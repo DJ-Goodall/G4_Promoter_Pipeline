@@ -20,6 +20,51 @@ Snakemake rules, one configuration file, no hidden state.
 
 ---
 
+## Quickstart — from a fresh clone to every figure
+
+Nothing here assumes you already have the data. A clone contains no input files; the download
+scripts fetch them, and the workflow fetches the reference annotations itself.
+
+```bash
+git clone https://github.com/DJ-Goodall/G4_Promoter_Pipeline.git
+cd G4_Promoter_Pipeline
+
+# 1. software (once)
+Rscript envs/install_r_packages.R              # CRAN + Bioconductor + DeepG4
+conda create -n G4 -c conda-forge -c bioconda snakemake
+conda env create -f envs/g4sp.yaml             # G4ShapePredictor python (pinned)
+conda env create -f envs/tf_new.yaml           # optional: TensorFlow for DeepG4
+
+# 2. data (~3.4 GB from GEO; resumable, size-verified)
+scripts/download_data.sh                       # or .\scripts\download_data.ps1 on Windows
+
+# 3. run
+conda activate G4
+snakemake -n                                   # dry run: should report ~50 jobs, no missing inputs
+snakemake --cores 4                            # full run
+```
+
+What the download step provides, and what the workflow provides on its own:
+
+| Input | Where it comes from | Automatic? |
+|---|---|---|
+| 28 CUT&Tag bigWigs | GEO GSE269084, per-sample FTP | `download_data.*` |
+| RNA-seq count table | GEO GSE269081 | `download_data.*` (unpacked for you) |
+| G4ShapePredictor + its model pickles | GitHub clone into `external/` | `download_data.*` |
+| GENCODE vM25 GTF | EBI FTP | yes — rule `gene_biotype`, with mirror fallbacks |
+| mm10 RepeatMasker | UCSC | yes — rule `unclassified_peak_context`, 4 mirrors |
+| ENCODE SCREEN cCREs | ENCODE, UCSC REST fallback | yes — rule `build_enhancers` |
+| mm10 genome + transcript models | Bioconductor `BSgenome`/`TxDb` | `install_r_packages.R` |
+| G4 topology control set | committed in `data/` | already present |
+| Output directories | created on demand | yes |
+
+Caveats worth stating plainly: you get the **same figures and tables**, and the numbers are
+reproducible because every subsampling step has a fixed seed — but agreement to the last decimal
+depends on matching package versions (R 4.5.1 / Bioconductor 3.21 here). DeepG4 is the one fragile
+dependency and its failure costs a single figure. Peaks are recalled from the bigWigs rather than
+read from a deposited peak file, so peak counts are a genuine reproduction of the calling step, not
+a copy of it.
+
 ## Contents
 
 - [Biological system](#biological-system)
@@ -127,7 +172,9 @@ One rule per numbered script, all wired into a single `rule all` — see [`Snake
 ```
 G4_Promoter_Pipeline/
 ├── Snakefile                     # 51 rules + rule all; one rule per numbered script
-├── config/config.yaml            # every path, threshold and parameter
+├── config/
+│   ├── config.yaml               # every path, threshold and parameter
+│   └── config.local.example.yaml # template for pointing at data you already have
 ├── scripts/
 │   ├── _shared/helpers.R         # shared helper library (bigWig I/O, peak calling,
 │   │                             #   profiles, genotype/clone mapping, plot themes)
@@ -138,9 +185,10 @@ G4_Promoter_Pipeline/
 │   └── download_data.sh          # fetch inputs from GEO (Linux/macOS/WSL)
 ├── envs/
 │   ├── install_r_packages.R      # installs the CRAN/Bioconductor/GitHub R stack
-│   ├── r_g4.yaml                 # conda R env (Linux/WSL only — see Installation)
 │   ├── g4sp.yaml                 # G4ShapePredictor python env (pinned sklearn 1.0.2)
-│   └── deepg4.yaml               # DeepG4 / TensorFlow env (Linux/WSL only)
+│   ├── tf_new.yaml               # TensorFlow 2.13 for the DeepG4 rule (optional)
+│   ├── r_g4.yaml                 # conda R env (Linux/WSL only — see Installation)
+│   └── deepg4.yaml               # all-in-one DeepG4 env (Linux/WSL only)
 ├── data/
 │   ├── geo_manifest.tsv          # the 28 CUT&Tag samples: accession, size, metadata
 │   ├── known_topology_controls.tsv   # 11 literature-validated control G4s
@@ -260,10 +308,17 @@ decision-tree node dtype changed in 1.3. A newer scikit-learn cannot unpickle th
 rule silently falls back to the loop-length heuristic. Do not relax these pins — see the comments in
 [`envs/g4sp.yaml`](envs/g4sp.yaml).
 
-**4. TensorFlow for DeepG4** (optional, one rule): an env named `tf-new` with TensorFlow 2.13 /
-Keras 2.13 / python 3.8, reached through `reticulate`. Configured by `deepg4.reticulate_condaenv`.
-If DeepG4 or TensorFlow is unavailable, only the ROC sanity check (script `22`) is lost — the
-topology branch completes on pqsfinder + G4ShapePredictor.
+**4. TensorFlow for DeepG4** (optional, one rule):
+
+```bash
+conda env create -f envs/tf_new.yaml       # python 3.8 + TF 2.13 + keras 2.13, via pip
+```
+
+TensorFlow comes from pip inside this env because conda-forge has no win-64 build of 2.13. The
+DeepG4 R package lives in your system R library and reaches this env through `reticulate`
+(`deepg4.reticulate_condaenv`, default `tf-new`). If DeepG4 or TensorFlow is unavailable, only the
+ROC sanity check (script `22`, figure `08_topology/deepg4_roc`) is lost — the topology branch
+completes on pqsfinder + G4ShapePredictor.
 
 **On Linux/WSL** you can take the conda route for everything instead:
 
@@ -371,47 +426,59 @@ Key tables: `peak_summary.csv` (peak counts and widths per set), `region_fold_en
 
 ## Selected results
 
-Figures below are from the v1.0.0 run and live in [`docs/figures/`](docs/figures/).
+Six figures from the v1.0.0 run, in [`docs/figures/`](docs/figures/). Each is produced by the rule
+named beneath it; the full set (23 themes, PDF + PNG) is regenerated by running the workflow.
 
-### RNA-seq: genotypes separate, dKO carries the transcriptional phenotype
+### RNA-seq quality control and differential expression
 
-<img src="docs/figures/01_qc_pca_plot.png" width="48%"> <img src="docs/figures/02_deseq2_upset_DEGs.png" width="48%">
+<img src="docs/figures/01_qc_pca_plot.png" width="49%"> <img src="docs/figures/02_deseq2_volcano_DHX36KO_vs_WT.png" width="49%">
 
-PCA of regularised counts and the overlap of significant DEGs across the three KO-vs-WT contrasts
-(padj < 0.05, |log2FC| > 0.5). <img src="docs/figures/02_deseq2_volcano_dKO_vs_WT.png" width="48%">
+*Left:* PCA of regularised counts — replicates cluster and the four genotypes separate
+(`01_rnaseq_qc.R`). *Right:* DHX36KO vs WT, 16,981 genes tested, padj < 0.05 and |log2FC| > 0.5.
+`Dhx36` itself is among the most significantly down-regulated genes, confirming the knockout;
+the imprinted lncRNAs `H19` and `Meg3` drop sharply, while `Gadd45a`, `Trh`, `Dnmt3a` and `Otx2`
+rise (`03_deseq2_plots.R`, table `deseq2_results_DHX36KO_vs_WT.tsv`).
 
-### CUT&Tag: reproducible peaks strongly enriched at promoters, 5′ UTRs and enhancers
+### G4 occupancy is enriched at promoters, 5′ UTRs and enhancers — and rises in the knockouts
 
-<img src="docs/figures/04_peaks_01_peak_width_distribution.png" width="48%"> <img src="docs/figures/05_cuttag_violin_signal_G4_BG4.png" width="48%">
+<img src="docs/figures/06_regional_region_metaprofile.png" width="100%">
 
-The z-score caller yields ~105–114 k G4 peaks per genotype (mean ~0.9 kb; 147,843 in the union) and
-~156–162 k R-loop peaks. Permutation enrichment puts BG4 peaks **~12× over expectation in 5′ UTRs**,
-**~5.6× in distal enhancers** and **~2× at promoters**, while R-loop peaks are essentially unenriched
-at promoters (~1.0×) — and the ERCC1 control tracks reach only ~1.3× at promoters, confirming the
-signal is antibody-specific rather than an artefact of the calling procedure.
+Metaprofiles across all five region classes for both assays and all six genotypes
+(`14_region_metaprofiles.R`). BG4 signal peaks sharply at promoters, 5′ UTRs and — more weakly —
+first introns, and is flat across gene bodies. The genotype ordering is consistent and
+dose-dependent: **WT < FANCJKO < DHX36KO ≈ dKO**, i.e. losing the helicases raises steady-state G4
+occupancy at promoters rather than redistributing it. R-loop (S9.6) profiles show the same TSS
+architecture with a much weaker genotype effect.
 
-<img src="docs/figures/06_regional_02_region_fold_enrichment.png" width="60%">
+<img src="docs/figures/06_regional_region_fold_enrichment.png" width="100%">
 
-### Topology: promoter G4s are overwhelmingly parallel
+Permutation enrichment against random placement quantifies the same picture
+(`12_peak_region_enrichment.R`, table `region_fold_enrichment.tsv`): BG4 peaks are **~12× enriched
+in 5′ UTRs**, **~5.6× in distal enhancers** and **~2× at promoters**, whereas R-loop peaks are
+unenriched at promoters (~1.0×, ns). The ERCC1 control tracks reach only ~1.3× at promoters —
+the enrichment is antibody-specific, not an artefact of the peak caller.
 
-<img src="docs/figures/08_topology_topology_counts.png" width="48%"> <img src="docs/figures/08_topology_deepg4_roc.png" width="48%">
+### Gain of promoter G4 signal tracks with expression change
 
-Combining pqsfinder with G4ShapePredictor at 0.80 precision assigns, in WT, **72.9 % parallel**,
-10.0 % hybrid, 7.9 % antiparallel and 9.1 % of peaks with no canonical PQS — a composition that
-barely shifts across genotypes (`topology_composition.csv`). DeepG4 scores peaks above GC-matched
-background with AUROC 0.56 (`sanity_metrics.csv`), an independent but deliberately weak sanity
-check rather than a classifier.
+<img src="docs/figures/07_integration_tss_profile_BG4_dKO_vs_WT.png" width="100%">
 
-### Integration, G4 × R-loop coupling, and multi-G4 promoters
+BG4 signal ±5 kb around the TSS of the top 500 up- and down-regulated genes, WT versus dKO
+(`16_integration_tss_profiles.R`). Absolute signal roughly doubles in the double knockout, and the
+directional split inverts across the TSS: up-regulated genes carry the higher peak downstream of
+the TSS, down-regulated genes upstream.
 
-<img src="docs/figures/07_integration_promoter_signal_boxplot_dKO_vs_WT.png" width="48%"> <img src="docs/figures/18_g4_rloop_correlation_g4_vs_rloop_correlation_summary.png" width="48%">
+### Topology-resolved TSS metaprofiles
 
-<img src="docs/figures/20_motif_distributions_motifs_per_peak.png" width="48%"> <img src="docs/figures/22_strand_strand_bias_comprehensive.png" width="48%">
+<img src="docs/figures/10_metaprofiles_tss_signal_by_topology.png" width="100%">
 
-Counting **every** PQS per peak rather than only the top-scoring one shows that 73 % of peaks carry
-≥ 2 distinct G4 loci (`motif_count_distribution.csv`), which is why Stage K repeats the promoter
-analyses at motif resolution. G4Hunter strand asymmetry at promoters and 5′ UTRs is symmetric within
-noise across all genotypes and both window sizes (`strand_bias_summary.tsv`).
+Promoters grouped by the topology of their strongest overlapping G4 peak
+(`24_tss_metaprofiles.R`). All three quadruplex classes give a sharp TSS peak — highest for
+**hybrid (3+1)**, then parallel (4+0), then antiparallel (2+2) — while promoters with no called G4
+peak are flat, an internal negative control. The helicase-loss ordering
+(WT < FANCJKO < DHX36KO ≈ dKO) holds within every topology class, so the KO effect is on occupancy
+magnitude rather than on which topology is present. Composition itself barely moves across
+genotypes: 72.9 % parallel, 10.0 % hybrid, 7.9 % antiparallel and 9.1 % without a canonical PQS in
+WT (`topology_composition.csv`).
 
 ---
 

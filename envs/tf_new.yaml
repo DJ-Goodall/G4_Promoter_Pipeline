@@ -1,0 +1,29 @@
+# TensorFlow environment for the DeepG4 rule (scripts/19_deepg4_predict.R).
+#
+# This env supplies ONLY TensorFlow/Keras. The DeepG4 R package itself lives in
+# your system R library (envs/install_r_packages.R installs it), and reaches
+# this env through reticulate — see `deepg4.reticulate_condaenv` in
+# config/config.yaml, which defaults to the env name below.
+#
+# Build:
+#   conda env create -f envs/tf_new.yaml
+#
+# TensorFlow is installed with pip, not conda: conda-forge has no win-64 build
+# of TensorFlow 2.13, and this mirrors the environment the published results
+# were produced in (python 3.8.19 + TF 2.13.0 + keras 2.13.1 + numpy 1.24.3).
+#
+# This env is OPTIONAL. If it is missing or TensorFlow fails to load, rule 19
+# fails and only the DeepG4 ROC sanity check (rule 22 / figure
+# 08_topology/deepg4_roc) is lost — the topology branch still completes on
+# pqsfinder + G4ShapePredictor.
+name: tf-new
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8
+  - pip
+  - pip:
+      - tensorflow==2.13.0
+      - keras==2.13.1
+      - numpy==1.24.3
+      - h5py==3.11.0
