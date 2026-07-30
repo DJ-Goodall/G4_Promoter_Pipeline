@@ -454,9 +454,9 @@ with their licences and citations: [`THIRD_PARTY.md`](THIRD_PARTY.md).
 
 ## License
 
-Code — [MIT](LICENSE). Committed figures and derived tables — CC-BY-4.0. Third-party software and
-reference data are not redistributed here and keep their own terms
-([`THIRD_PARTY.md`](THIRD_PARTY.md)).
+Code — [MIT](LICENSE). Committed figures and derived tables — CC-BY-4.0, see
+[`LICENSE-DATA.md`](LICENSE-DATA.md). Third-party software and reference data are not
+redistributed here and keep their own terms ([`THIRD_PARTY.md`](THIRD_PARTY.md)).
 
 ## Acknowledgements
 

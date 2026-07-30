@@ -19,18 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-The MIT terms above cover the workflow code in this repository (Snakefile,
-config/, scripts/, envs/ and the documentation).
-
-The derived data products distributed alongside the code — the summary tables
-in results/tables/ and the figures in docs/figures/ — are released under the
-Creative Commons Attribution 4.0 International licence (CC-BY-4.0,
-https://creativecommons.org/licenses/by/4.0/).
-
-Third-party software invoked by this workflow (DeepG4, G4ShapePredictor,
-pqsfinder, Bioconductor packages) and third-party reference data (GENCODE,
-ENCODE SCREEN, UCSC RepeatMasker, JASPAR) are neither included nor
-redistributed here; they carry their own licences. See THIRD_PARTY.md.
