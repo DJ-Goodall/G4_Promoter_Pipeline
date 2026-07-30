@@ -2,10 +2,10 @@
 
 **A reproducible Snakemake workflow for promoter-centric G-quadruplex and R-loop analysis of CUT&Tag and RNA-seq data.**
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21705743.svg)](https://doi.org/10.5281/zenodo.21705743)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Snakemake](https://img.shields.io/badge/snakemake-%E2%89%A57.0-brightgreen.svg)](https://snakemake.readthedocs.io)
 [![R](https://img.shields.io/badge/R-4.5.1-blue.svg)](https://www.r-project.org/)
-<!-- [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX) -->
 
 This workflow takes public G-quadruplex (BG4) and R-loop (S9.6) CUT&Tag coverage tracks together
 with an RNA-seq count table from wild-type, **DHX36** knockout, **FANCJ** knockout and
@@ -539,14 +539,20 @@ If this workflow contributes to your work, please cite both the software and the
 
 ```bibtex
 @software{goodall_g4_promoter_pipeline,
-  author  = {Goodall, Daniel J. and Sato, K. and Knipscheer, P.},
-  title   = {{G4\_Promoter\_Pipeline}: a Snakemake workflow for promoter-centric
-             G-quadruplex and R-loop analysis of CUT\&Tag and RNA-seq data},
-  version = {1.0.0},
-  year    = {2026},
-  url     = {https://github.com/DJ-Goodall/G4_Promoter_Pipeline}
+  author    = {Goodall, Daniel J. and Sato, K. and Knipscheer, P.},
+  title     = {{G4\_Promoter\_Pipeline}: a Snakemake workflow for promoter-centric
+               G-quadruplex and R-loop analysis of CUT\&Tag and RNA-seq data},
+  version   = {1.0.0},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21705743},
+  url       = {https://doi.org/10.5281/zenodo.21705743}
 }
 ```
+
+Two DOIs exist. **`10.5281/zenodo.21705743` is the concept DOI** — it always resolves to the newest
+release and is the one to cite. `10.5281/zenodo.21705744` pins v1.0.0 specifically, for when an
+analysis must reference the exact code that produced it.
 
 Machine-readable metadata: [`CITATION.cff`](CITATION.cff) and [`.zenodo.json`](.zenodo.json).
 Data: GEO GSE269081 / GSE269082 / GSE269084 (*Sato et al.*). Third-party tools and reference data,

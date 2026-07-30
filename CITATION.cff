@@ -17,6 +17,15 @@ authors:
     family-names: Knipscheer
     affiliation: Hubrecht Institute, Utrecht, The Netherlands
 repository-code: "https://github.com/DJ-Goodall/G4_Promoter_Pipeline"
+# Concept DOI — always resolves to the newest release; cite this one.
+doi: "10.5281/zenodo.21705743"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.21705743"
+    description: Concept DOI for all versions of this workflow
+  - type: doi
+    value: "10.5281/zenodo.21705744"
+    description: DOI for version 1.0.0
 abstract: >-
   A single reproducible Snakemake workflow that takes public G-quadruplex (BG4)
   and R-loop (S9.6) CUT&Tag coverage tracks together with an RNA-seq count table
