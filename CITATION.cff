@@ -10,6 +10,12 @@ authors:
     family-names: Goodall
     affiliation: Hubrecht Institute, Utrecht, The Netherlands
     orcid: "https://orcid.org/0000-0001-5942-6303"
+  - given-names: K.
+    family-names: Sato
+    affiliation: Hubrecht Institute, Utrecht, The Netherlands
+  - given-names: P.
+    family-names: Knipscheer
+    affiliation: Hubrecht Institute, Utrecht, The Netherlands
 repository-code: "https://github.com/DJ-Goodall/G4_Promoter_Pipeline"
 abstract: >-
   A single reproducible Snakemake workflow that takes public G-quadruplex (BG4)
