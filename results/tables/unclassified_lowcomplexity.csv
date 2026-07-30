@@ -1,0 +1,4 @@
+group,n,dinuc_entropy_med,max_homopolymer_med
+No canonical PQS,8000,3.755,5
+Classified (P/AP/H),8000,3.81,5
+GC-matched background,8000,3.821,5

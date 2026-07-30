@@ -1,0 +1,17 @@
+metric_a,metric_b,spearman_rho
+deepg4_prob,deepg4_prob,1
+pqsfinder_score,deepg4_prob,0.4411378141254309
+g4hunter_win,deepg4_prob,0.0209084315458624
+g4hunter_pqs,deepg4_prob,0.32984858759603997
+deepg4_prob,pqsfinder_score,0.4411378141254309
+pqsfinder_score,pqsfinder_score,1
+g4hunter_win,pqsfinder_score,3.4842199008579917e-4
+g4hunter_pqs,pqsfinder_score,0.6348327931696598
+deepg4_prob,g4hunter_win,0.0209084315458624
+pqsfinder_score,g4hunter_win,3.4842199008579917e-4
+g4hunter_win,g4hunter_win,1
+g4hunter_pqs,g4hunter_win,0.0055177401132917026
+deepg4_prob,g4hunter_pqs,0.32984858759603997
+pqsfinder_score,g4hunter_pqs,0.6348327931696598
+g4hunter_win,g4hunter_pqs,0.0055177401132917026
+g4hunter_pqs,g4hunter_pqs,0.9999999999999998

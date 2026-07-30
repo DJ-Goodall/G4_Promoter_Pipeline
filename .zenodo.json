@@ -1,0 +1,62 @@
+{
+  "title": "G4_Promoter_Pipeline: a Snakemake workflow for promoter-centric G-quadruplex and R-loop analysis of CUT&Tag and RNA-seq data",
+  "description": "<p>A single reproducible Snakemake workflow that takes public G-quadruplex (BG4) and R-loop (S9.6) CUT&amp;Tag coverage tracks together with an RNA-seq count table from wild-type, DHX36 knockout, FANCJ knockout and double-knockout mouse embryonic stem cells, and produces the complete analysis:</p><ul><li>RNA-seq quality control, DESeq2 differential expression across five contrasts, GO and GSEA functional enrichment, biotype-resolved volcano plots</li><li>replicate-aware, z-score based CUT&amp;Tag peak calling and construction of promoter, 5' UTR, first-intron, gene-body and ENCODE cCRE enhancer region sets</li><li>genome-wide CUT&amp;Tag quality control and regional signal enrichment with metaprofiles</li><li>integration of differential expression with promoter and TSS occupancy</li><li>sequence-level G-quadruplex topology assignment combining pqsfinder, DeepG4 and G4ShapePredictor, calibrated against literature-validated control quadruplexes</li><li>topology-resolved metaprofiles across genomic features and lncRNAs, characterisation of peaks without a canonical quadruplex motif, G-quadruplex versus R-loop coupling, multi-G4 promoter analysis at motif resolution, strand asymmetry and locus-level track visualisation</li></ul><p>Fifty numbered R and Python scripts are wired into roughly fifty Snakemake rules; every threshold and path lives in one configuration file, and all intermediates are cached so the workflow reproduces end to end from public data. Input data are available from NCBI GEO (GSE269081, GSE269082, GSE269084) and are fetched by the included download scripts.</p>",
+  "upload_type": "software",
+  "license": "mit",
+  "access_right": "open",
+  "version": "1.0.0",
+  "language": "eng",
+  "creators": [
+    {
+      "name": "Goodall, Daniel J.",
+      "affiliation": "Hubrecht Institute, Utrecht, The Netherlands"
+    }
+  ],
+  "keywords": [
+    "G-quadruplex",
+    "R-loop",
+    "CUT&Tag",
+    "RNA-seq",
+    "Snakemake",
+    "reproducible workflow",
+    "DHX36",
+    "FANCJ",
+    "promoter",
+    "transcription",
+    "mouse embryonic stem cells",
+    "mm10",
+    "bioinformatics"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE269081",
+      "relation": "isDerivedFrom",
+      "resource_type": "dataset",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE269082",
+      "relation": "isDerivedFrom",
+      "resource_type": "dataset",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE269084",
+      "relation": "isDerivedFrom",
+      "resource_type": "dataset",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://github.com/raphaelmourad/DeepG4",
+      "relation": "references",
+      "resource_type": "software",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://github.com/donn-liew/G4ShapePredictor",
+      "relation": "references",
+      "resource_type": "software",
+      "scheme": "url"
+    }
+  ]
+}

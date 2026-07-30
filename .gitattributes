@@ -1,0 +1,15 @@
+# Normalise line endings so the workflow behaves identically on Windows and Unix.
+* text=auto eol=lf
+
+# Shell scripts must keep LF or bash fails with "\r: command not found".
+*.sh    text eol=lf
+# PowerShell is happiest with CRLF on Windows.
+*.ps1   text eol=crlf
+
+# Never touch binary or data payloads.
+*.png   binary
+*.pdf   binary
+*.gz    binary
+*.bw    binary
+*.rds   binary
+*.pkl   binary

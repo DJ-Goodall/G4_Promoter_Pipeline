@@ -1,0 +1,35 @@
+# R environment for genomics + plotting steps (01, 02, 05, 06, 07, 08).
+# NOTE: Linux/WSL ONLY — bioconda has no Windows builds. On native Windows the
+# pipeline uses your SYSTEM R instead (see README); do not create this on Windows.
+# Build (Linux/WSL):  conda env create -f envs/r_g4.yaml
+name: r_g4
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base=4.3
+  - r-yaml
+  - r-dplyr
+  - r-tidyr
+  - r-stringr
+  - r-readr
+  - r-ggplot2
+  - r-cowplot
+  - r-ggrepel
+  - r-rcolorbrewer
+  - r-scales
+  - r-proc                 # ROC / AUROC for the DeepG4 sanity check
+  # Bioconductor
+  - bioconductor-rtracklayer
+  - bioconductor-genomicranges
+  - bioconductor-genomicfeatures
+  - bioconductor-genomeinfodb
+  - bioconductor-iranges
+  - bioconductor-s4vectors
+  - bioconductor-biostrings
+  - bioconductor-pqsfinder
+  - bioconductor-bsgenome.mmusculus.ucsc.mm10
+  - bioconductor-txdb.mmusculus.ucsc.mm10.knowngene
+  - bioconductor-edger
+  - bioconductor-limma

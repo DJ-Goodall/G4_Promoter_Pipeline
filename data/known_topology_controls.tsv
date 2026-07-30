@@ -1,0 +1,11 @@
+name	sequence	topology	note
+cMYC_Pu27	TGGGGAGGGTGGGGAGGGTGGGGAAGG	parallel	c-MYC NHE III1; canonical parallel (NMR, K+)
+cKIT1	AGGGAGGGCGCTGGGAGGAGGG	parallel	c-KIT promoter; parallel (NMR/X-ray, K+)
+cKIT2	CGGGCGGGCGCGAGGGAGGGG	parallel	c-KIT promoter; parallel (NMR, K+)
+VEGF	CGGGGCGGGCCGGGGGCGGGGT	parallel	VEGF promoter; parallel (NMR, K+)
+KRAS	AGGGCGGTGTGGGAAGAGGGAAGAGGGGGAGG	parallel	KRAS NHE; parallel (K+)
+HRAS	TCGGGTTGCGGGCGCAGGGCACGGGCG	parallel	HRAS promoter; parallel (K+)
+BCL2_Pu39	GGGCGCGGGAGGAAGGGGGCGGG	parallel	BCL2 P1 promoter; predominantly parallel (K+)
+Telomere_human	AGGGTTAGGGTTAGGGTTAGGG	hybrid	human telomeric (TTAGGG)4; hybrid (3+1) in K+ (condition-dependent)
+TBA	GGTTGGTGTGGTTGG	antiparallel	thrombin-binding aptamer; antiparallel chair-type
+Oxytricha_telomere	GGGGTTTTGGGG	antiparallel	Oxytricha telomeric G4T4G4; antiparallel (condition-dependent)

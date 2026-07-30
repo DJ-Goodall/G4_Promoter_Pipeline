@@ -1,0 +1,296 @@
+# ============================================================================
+# G4_Promoter_Pipeline — unified configuration
+#
+# Every threshold, path and parameter used by the workflow lives here; the
+# scripts read nothing from the environment. All paths are relative to the
+# repository root (the Snakemake working directory).
+#
+# Peaks and regions are recomputed by the Stage-B rules into ./cache, so the
+# whole workflow reproduces from the public bigWigs + count table alone;
+# `paths.cache_v2` therefore points at this repository's own `cache/`.
+#
+# Smoke test: set `peak_subsample: 2000` at the bottom of this file for a fast
+# end-to-end pass, then set it back to `null` for the real run.
+# ============================================================================
+
+# ---- Input / output locations ---------------------------------------------
+paths:
+  # This pipeline's own cache (Stage B writes peaks_*.rds + regions_*.rds here).
+  cache_v2:      "cache"
+  # The 28 CUT&Tag bigWigs (12 G4 + 8 R-loop + 8 ERCC), fetched from GEO GSE269084
+  # by scripts/download_data.ps1 (or .sh). To read an existing copy in place
+  # instead, copy config/config.local.example.yaml to config/config.local.yaml,
+  # point it at your directory, and run:
+  #   snakemake --cores 4 --configfile config/config.local.yaml
+  bigwig_dir:    "data/bigwig"
+  # Promoter GRanges (TSS +/- 2 kb), now built by Stage B rule 08 into cache/.
+  promoters_rds: "cache/regions_promoter.rds"
+  # Upstream model repos (git-ignored, read-only). g4sp_repo is required by the
+  # G4ShapePredictor python rules (20, 26a, 26b, 42) and is cloned by
+  # scripts/download_data.sh. deepg4_repo is NOT read by any rule — the DeepG4
+  # CNN comes from the R package (remotes::install_github("raphaelmourad/DeepG4"));
+  # the key is kept only for provenance.
+  deepg4_repo:   "external/DeepG4"
+  g4sp_repo:     "external/G4ShapePredictor"
+
+# ---- Biology --------------------------------------------------------------
+genome: mm10
+assay:  G4_BG4                       # topology sub-pipeline is G4-focused (BG4)
+genotypes: [WT, DHX36KO, FANCJKO, dKO]
+ref_genotype: WT
+std_chroms: [chr1, chr2, chr3, chr4, chr5, chr6, chr7, chr8, chr9, chr10,
+             chr11, chr12, chr13, chr14, chr15, chr16, chr17, chr18, chr19, chrX]
+
+# ---- Stage A: RNA-seq (analysis_V2 §2-4) ----------------------------------
+rnaseq:
+  count_table: "data/rnaseq/GSE269081_count_table.tsv"   # GEO GSE269081
+  min_count: 10                       # rowSum >= keep
+  padj: 0.05                          # DEG significance
+  lfc: 0.5                            # DEG |log2FC| threshold (project standard)
+  lfc_shrink: true                    # ashr shrinkage
+  # count-table sample-column prefix -> genotype
+  sample_map: {WT: WT, D: DHX36KO, J: FANCJKO, DJ: dKO}
+  # 5 DESeq2 contrasts as [numerator, denominator] genotype pairs
+  contrasts:
+    - [DHX36KO, WT]
+    - [FANCJKO, WT]
+    - [dKO, WT]
+    - [dKO, DHX36KO]
+    - [dKO, FANCJKO]
+  volcano_top_n: 15                   # labelled genes per EnhancedVolcano
+  go_pvalue: 0.05                     # enrichGO cutoff
+  go_show: 15                         # categories shown per dotplot
+  gsea_minsize: 15
+  gsea_maxsize: 500
+  gsea_targeted_minsize: 10
+  gsea_targeted_maxsize: 1000
+  # targeted-pathway regexes (C5 GO:BP) for the dKO deep-dive (analysis_V2 §4c)
+  targeted_patterns:
+    - "DNA_REPAIR"
+    - "DNA_DAMAGE"
+    - "REPLICATION_STRESS"
+    - "ATR|ATM"
+    - "QUADRUPLEX|G_QUADRUPLEX"
+    - "R_LOOP|RNA_DNA_HYBRID"
+
+# ---- Stage B: peak calling (extended_V3 §2) -------------------------------
+peak_calling:
+  bin_size: 500
+  z_thresh: 2
+  min_replicates: 2                   # G4 has 3 reps -> 2; R-loop 2 -> 2
+  gap_bp: 500
+  min_width: 500
+  assays: [G4_BG4, Rloop_S96]
+  # full genotype set incl. ERCC controls (main + ERCC unions built separately)
+  genotypes: [WT, DHX36KO, FANCJKO, dKO, ERCCWT, ERCCKO]
+
+# ---- Stage B: region building (extended_V3 §3) ----------------------------
+regions:
+  promoter_up: 2000
+  promoter_down: 2000
+  # ENCODE SCREEN V3 mm10 cCRE candidate URLs (distal-ELS kept); UCSC REST fallback.
+  enhancer_urls:
+    - "https://downloads.wenglab.org/Registry-V3/GRCm38-cCREs.bed"
+    - "https://www.encodeproject.org/files/ENCFF846BKF/@@download/ENCFF846BKF.bed.gz"
+
+# ---- Stage C: genome-wide CUT&Tag QC (analysis_V2 §5) ---------------------
+genomewide:
+  window: 1000                        # 1 kb genome tiles
+  subsample: 500000                   # windows kept (Windows memory)
+  subsample_seed: 42
+  violin_subsample: 50000             # nonzero windows per sample for the violin
+  scatter_subsample: 50000            # windows per genotype for G4-vs-Rloop scatter
+
+# ---- Stage D: regional enrichment (extended_V3 §3) ------------------------
+regional:
+  region_signal_n: 5000               # regions/class subsample for signal boxplot
+  region_signal_seed: 123
+  profile_n: 2000                     # regions/class for the metaprofile
+  profile_seed: 7
+  profile_full_cap: 4000              # cap for the full-peak validation metaprofile
+  profile_full_seed: 8
+  n_bins: 80
+  half_width: 2000
+
+# ---- Stage E: RNA x CUT&Tag integration (analysis_V2 §6) ------------------
+integration:
+  promoter_half_width: 2000           # TSS +/- for promoter signal boxplots
+  tss_half_width: 5000                # TSS +/- for TSS profiles
+  tss_n_bins: 100
+  top_degs: 500                       # top up + top down DEGs per KO-vs-WT
+
+# ---- Stage L: strand asymmetry (g4_gloop_strand_analysis.Rmd s1-s8) -------
+strand:
+  window_sizes: [250, 500]            # +/- bp around peak centre for G4Hunter
+  g4_threshold: 0.0                   # custom G4Hunter net-G-richness cutoff
+  subsample: 2000                     # peaks/genotype (promoter + 5'UTR only)
+  seed: 2026
+  region_types: [promoter, 5UTR]
+  n_bins: 100                         # strand metaprofile bins
+  half_width: 2000                    # strand metaprofile TSS +/-
+
+# ---- Stage L: Gviz locus tracks (strand chunk s9-gviz-gene-loci) ----------
+gviz:
+  n_loci: 5
+  padding: 5000                       # bp each side of peak midpoint -> 10 kb view
+  replicate: 1                        # use rep-1 bigWig per genotype
+  ideogram_cache: "cache/ideogram_mm10.rds"  # offline cytoband cache
+
+# ===========================================================================
+# BELOW: parameters for the sequence-level topology, metaprofile, motif, lncRNA
+# and G4 x R-loop rules (Stages F-K). Rule numbers quoted in the section
+# headers refer to the numbered scripts in scripts/.
+# ===========================================================================
+
+# ---- Sequence extraction (DeepG4 rule 02 -> new 18) -----------------------
+sequences:
+  deepg4_width: 201
+  background_n: 20000
+  background_seed: 42
+  gc_bins: 20
+
+# ---- pqsfinder ------------------------------------------------------------
+pqsfinder:
+  min_score: 20
+  strand: "*"
+
+# ---- DeepG4 (formation-probability sanity check) --------------------------
+deepg4:
+  reticulate_condaenv: "tf-new"
+
+# ---- G4ShapePredictor -----------------------------------------------------
+g4sp:
+  conda_env: "g4sp"
+  model: "RandomForest (default).pkl"
+  threshold_file: "(precision)optimized_threshold.pkl"
+  precision: 0.80
+
+# ---- Loop-length topology heuristic ---------------------------------------
+heuristic:
+  parallel_max_loop: 3
+  antiparallel_min_long_loops: 2
+
+# ---- Differential peak signal (gain/loss) ---------------------------------
+differential:
+  voom_padj: 0.1
+  voom_lfc:  0.585
+
+# ---- Topology meta-profiles (DeepG4 rules 08/14/15/16/17/24) --------------
+metaprofile:
+  half_width: 2000
+  n_bins: 80
+  include_none_group: true
+  max_per_group: 16000
+  normalize_promoter_to_none: true
+  feature_regions: ["promoter", "5UTR", "intron1", "enhancer"]
+  feature_fixed_ymax: 30
+  total_feature_regions: ["promoter", "5UTR", "intron1", "enhancer", "lncRNA"]
+  deg_half_width: 2000
+  deg_padj: 0.05
+  deg_lfc:  0.5
+  deg_grid_kos: ["DHX36KO", "dKO"]
+  deg_fixed_ymax: 28
+  deg_5utr_grid_ymax: 40
+
+# ---- All-PQS / multi-G4 motif analysis (DeepG4 rules 27-32) ---------------
+motif_analysis:
+  min_score: 20
+  collapse_overlaps: true
+  signal_half_width: 100
+  promoter_half_width: 2000
+  n_bins: 80
+  count_buckets: [0, 1, 2, 3, 4]
+  assign_motif_to: nearest_tss
+
+# ---- Topology calibration (DeepG4 rule 10) --------------------------------
+calibration:
+  precision_grid: ["default", 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+  controls_tsv: "data/known_topology_controls.tsv"
+
+# ---- Genomic-feature partition (DeepG4 rule 11) ---------------------------
+feature:
+  region_files:
+    promoter: "regions_promoter.rds"
+    "5UTR":   "regions_5UTR.rds"
+    intron1:  "regions_intron1.rds"
+    genebody: "regions_genebody.rds"
+    enhancer: "regions_enhancer.rds"
+
+# ---- G4 x R-loop coupling (DeepG4 rule 12) --------------------------------
+rloop:
+  assay: "Rloop_S96"
+  union_rds: "peaks_Rloop_S96_union.rds"
+  propensity_bins: 4
+
+# ---- RNA-seq expression integration (DeepG4 rules 13a/13b) ----------------
+# NOTE: 13a (DESeq2) is REPLACED by Stage-A script 02, which writes the same
+# `results/tables/deseq2_KO_vs_WT.csv` schema. These keys remain for the count
+# read done by script 02 and any consumer that references cfg$expression.
+expression:
+  count_table: "data/rnaseq/GSE269081_count_table.tsv"
+  min_count: 10
+  lfc_shrink: true
+  sample_map:
+    WT: WT
+    D:  DHX36KO
+    J:  FANCJKO
+    DJ: dKO
+
+# ---- G4 vs R-loop promoter signal correlation (DeepG4 rule 25) ------------
+g4_rloop_correlation:
+  genotypes: [WT, DHX36KO, FANCJKO, dKO]
+  mean_half_width: 2000
+  bin_half_width: 1000
+  bin_size: 200
+  pseudocount: 1
+  cnt_norm: background_median
+  background_n: 20000
+  background_seed: 7
+  bin_subsample_n: 3000
+  comparability: zscore
+  hexbin: true
+
+# ---- G4 vs R-loop promoter co-occurrence (DeepG4 rule 26) -----------------
+g4_rloop_cooccurrence:
+  genotypes: [WT, DHX36KO, FANCJKO, dKO]
+  ref_genotype: WT
+  half_width: 2000
+  n_bins: 100
+  pseudocount: 1
+  cnt_norm: background_median
+  background_n: 20000
+  background_seed: 7
+  n_strata: 4
+  heatmap_genotypes: [WT]
+  heatmap_max_rows: 5000
+  heatmap_cap_z: 3
+  voom_padj: 0.1
+  voom_lfc: 0.585
+  profile_subsample_n: null
+
+# ---- Unclassified (no-canonical-PQS) peak characterisation (rules 18-20) --
+unclassified:
+  rmsk_url: "https://hgdownload.gi.ucsc.edu/goldenPath/mm10/database/rmsk.txt.gz"
+  rmsk_local: "data/rmsk_mm10.txt.gz"
+  subsample: 16980
+  motif_pcut: 5.0e-5
+  jaspar_tax: "vertebrates"
+
+# ---- Volcano + lncRNA G4 metaprofiles (rules 21-23) -----------------------
+lncrna:
+  gtf_url:   "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.annotation.gtf.gz"
+  gtf_local: "data/gencode.vM25.annotation.gtf.gz"
+  biotypes:
+    - lincRNA
+    - antisense
+    - processed_transcript
+    - sense_intronic
+    - sense_overlapping
+    - 3prime_overlapping_ncRNA
+    - bidirectional_promoter_lncRNA
+    - macro_lncRNA
+  volcano_label_n: 50
+
+# ---- Dev / smoke-test knob ------------------------------------------------
+peak_subsample: null
+peak_subsample_seed: 7

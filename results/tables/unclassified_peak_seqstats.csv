@@ -1,0 +1,4 @@
+group,n,gc_med,g4_runs_med,pct_ge4_runs,abs_gskew_med
+No canonical PQS,16980,0.368,2,6.9,0.103
+Classified (P/AP/H),130863,0.483,5,69.9,0.171
+GC-matched background,20000,0.473,3,47.9,0.118

@@ -1,0 +1,10 @@
+topology_g4sp,topology_heuristic,n
+antiparallel,antiparallel,191
+antiparallel,hybrid,2815
+antiparallel,parallel,1093
+hybrid,antiparallel,379
+hybrid,hybrid,741
+hybrid,parallel,759
+parallel,antiparallel,24969
+parallel,hybrid,37566
+parallel,parallel,33125

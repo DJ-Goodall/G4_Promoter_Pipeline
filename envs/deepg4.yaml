@@ -1,0 +1,28 @@
+# Environment for the DeepG4 formation-probability step (rule 03).
+# NOTE: Linux/WSL ONLY. On native Windows, rule 03 runs in your SYSTEM R and reaches
+# TensorFlow via reticulate -> the existing `tf-new` conda env (see README); the
+# DeepG4 R package is installed into system R, not here.
+# Mirrors the machine's known-good `tf-new` env (py3.8 / TF2.13 / keras2.13).
+# Build (Linux/WSL):  conda env create -f envs/deepg4.yaml
+# THEN install the DeepG4 R package (not on conda) into this env, e.g.:
+#   conda run -n deepg4 R -e 'remotes::install_github("morphos/DeepG4")'   # or raphaelmourad/DeepG4
+# (Set reticulate to this env's python; 03_deepg4_predict.R does this via RETICULATE_PYTHON.)
+name: deepg4
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.8
+  - tensorflow=2.13
+  - keras=2.13
+  - numpy
+  - pandas
+  - h5py
+  - r-base=4.3
+  - r-reticulate
+  - r-yaml
+  - r-readr
+  - r-remotes                       # to install the DeepG4 R package from GitHub
+  - bioconductor-biostrings
+  - bioconductor-bsgenome.mmusculus.ucsc.mm10

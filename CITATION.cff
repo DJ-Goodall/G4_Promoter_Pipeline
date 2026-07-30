@@ -1,0 +1,84 @@
+cff-version: 1.2.0
+title: >-
+  G4_Promoter_Pipeline: a Snakemake workflow for promoter-centric
+  G-quadruplex and R-loop analysis of CUT&Tag and RNA-seq data
+message: >-
+  If you use this workflow, please cite it using the metadata in this file.
+type: software
+authors:
+  - given-names: Daniel J.
+    family-names: Goodall
+    affiliation: Hubrecht Institute, Utrecht, The Netherlands
+    # orcid: "https://orcid.org/0000-0000-0000-0000"   # TODO: add your ORCID
+repository-code: "https://github.com/DJ-Goodall/G4_Promoter_Pipeline"
+abstract: >-
+  A single reproducible Snakemake workflow that takes public G-quadruplex (BG4)
+  and R-loop (S9.6) CUT&Tag coverage tracks together with an RNA-seq count table
+  from wild-type, DHX36 knockout, FANCJ knockout and double-knockout mouse
+  embryonic stem cells, and produces the complete analysis: RNA-seq quality
+  control, differential expression and functional enrichment; replicate-aware
+  CUT&Tag peak calling and genomic region building; genome-wide and regional
+  signal enrichment; integration of differential expression with promoter and
+  TSS occupancy; sequence-level G-quadruplex topology assignment combining
+  pqsfinder, DeepG4 and G4ShapePredictor with literature-based calibration;
+  topology-resolved metaprofiles across promoters, 5' UTRs, first introns,
+  enhancers and lncRNAs; G-quadruplex versus R-loop coupling; multi-G4 promoter
+  analysis at motif resolution; and strand-asymmetry plus locus-level track
+  visualisation. Fifty numbered scripts are wired into roughly fifty Snakemake
+  rules, all parameters live in a single configuration file, and every
+  intermediate is cached so the workflow reproduces end to end from public data.
+keywords:
+  - G-quadruplex
+  - R-loop
+  - CUT&Tag
+  - RNA-seq
+  - Snakemake
+  - reproducible workflow
+  - DHX36
+  - FANCJ
+  - promoter
+  - transcription
+  - mouse embryonic stem cells
+  - mm10
+  - bioinformatics
+license: MIT
+version: 1.0.0
+date-released: "2026-07-30"
+references:
+  - type: data
+    title: >-
+      RNA transcripts regulate G-quadruplex landscapes through G-loop formation
+      (RNA-seq)
+    authors:
+      - name: Sato et al.
+    notes: "GEO accession GSE269081 — RNA-seq count table consumed by Stage A"
+    url: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE269081"
+  - type: data
+    title: >-
+      RNA transcripts regulate G-quadruplex landscapes through G-loop formation
+      (G4 and R-loop CUT&Tag)
+    authors:
+      - name: Sato et al.
+    notes: >-
+      GEO accessions GSE269082 (subseries) and GSE269084 (series) — the 28
+      bigWig coverage tracks consumed by Stages B-L
+    url: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE269084"
+  - type: software
+    title: "DeepG4: a deep learning approach to predict active G-quadruplexes"
+    authors:
+      - given-names: Raphaël
+        family-names: Mourad
+    url: "https://github.com/raphaelmourad/DeepG4"
+    notes: "G-quadruplex formation-probability sanity check (script 19)"
+  - type: software
+    title: "G4ShapePredictor: prediction of G-quadruplex topology"
+    authors:
+      - name: Liew et al.
+    url: "https://github.com/donn-liew/G4ShapePredictor"
+    notes: "Topology classification of putative quadruplex sequences (scripts 20, 26a, 26b)"
+  - type: software
+    title: "pqsfinder: identification of potential quadruplex-forming sequences"
+    authors:
+      - name: Hon, Martínek, Zendulka, Lexa
+    url: "https://bioconductor.org/packages/pqsfinder/"
+    notes: "Putative quadruplex sequence detection and loop-length heuristic"

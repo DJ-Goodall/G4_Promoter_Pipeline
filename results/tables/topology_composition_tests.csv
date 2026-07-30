@@ -1,0 +1,11 @@
+test,topology,comparison,statistic,p_value
+chisq_topology_x_genotype,NA,NA,2.355473795693377,0.8842788665664449
+prop_test_topology_KO_vs_WT,parallel,DHX36KO_vs_WT,NA,0.862934291500743
+prop_test_topology_KO_vs_WT,antiparallel,DHX36KO_vs_WT,NA,0.9398962207192116
+prop_test_topology_KO_vs_WT,hybrid,DHX36KO_vs_WT,NA,0.8852650502065935
+prop_test_topology_KO_vs_WT,parallel,FANCJKO_vs_WT,NA,0.8923661429136598
+prop_test_topology_KO_vs_WT,antiparallel,FANCJKO_vs_WT,NA,0.4819636672868611
+prop_test_topology_KO_vs_WT,hybrid,FANCJKO_vs_WT,NA,0.651071203040043
+prop_test_topology_KO_vs_WT,parallel,dKO_vs_WT,NA,0.6162203116086463
+prop_test_topology_KO_vs_WT,antiparallel,dKO_vs_WT,NA,0.4856429506748708
+prop_test_topology_KO_vs_WT,hybrid,dKO_vs_WT,NA,0.9993982183569671

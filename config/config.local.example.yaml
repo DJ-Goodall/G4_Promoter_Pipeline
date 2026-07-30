@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------------------
+# Local path overlay — for running the workflow against data you already have
+# somewhere else, without copying or re-downloading it.
+#
+#   cp config/config.local.example.yaml config/config.local.yaml
+#   # edit the paths below, then:
+#   snakemake --cores 4 --configfile config/config.local.yaml
+#
+# Snakemake merges this file recursively into config/config.yaml, so you only
+# list the keys you want to change — every other setting (thresholds, contrasts,
+# window sizes) is inherited unchanged.
+#
+# config/config.local.yaml is git-ignored, so your machine-specific paths never
+# end up in a commit. Note that `snakemake --config paths.bigwig_dir=...` does
+# NOT work: --config only accepts top-level keys, hence this overlay file.
+# ---------------------------------------------------------------------------
+
+paths:
+  # Directory holding the 28 CUT&Tag bigWigs (see data/geo_manifest.tsv).
+  bigwig_dir: "D:/path/to/existing/bigwigs"
+
+rnaseq:
+  # GSE269081 count table, uncompressed TSV.
+  count_table: "D:/path/to/existing/GSE269081_count_table.tsv"
+
+expression:
+  # Same file — a few downstream scripts read it through this key.
+  count_table: "D:/path/to/existing/GSE269081_count_table.tsv"

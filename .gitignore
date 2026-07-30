@@ -1,0 +1,106 @@
+# ---------------------------------------------------------------------------
+# G4_Promoter_Pipeline — what stays out of version control
+#
+# The repository tracks the workflow (Snakefile, config, scripts, envs), the
+# hand-curated topology controls, the small summary tables and the showcase
+# figures under docs/. Everything else is either regenerable by running the
+# pipeline or downloadable from a public archive.
+# ---------------------------------------------------------------------------
+
+# --- Machine-specific path overlay (template: config.local.example.yaml) ----
+config/config.local.yaml
+
+# --- Regenerable pipeline state --------------------------------------------
+cache/
+logs/
+.snakemake/
+
+# --- Public inputs: fetch with scripts/download_data.ps1 (or .sh) ----------
+data/bigwig/
+data/rnaseq/
+# GENCODE vM25 GTF (~28 MB) and mm10 RepeatMasker (~142 MB)
+data/*.gz
+# G4ShapePredictor / DeepG4 upstream clones
+external/
+
+# --- Outputs ---------------------------------------------------------------
+# results/figures/ is excluded wholesale (PDF+PNG, ~100 MB per full run);
+# representative PNGs live in docs/figures/ instead. Under results/tables/
+# only the small summary tables committed with the initial release are
+# tracked — the large per-motif catalogues (up to 89 MB) are not.
+/results/*
+!/results/tables/
+/results/tables/*
+!/results/tables/deg_5utr_counts.csv
+!/results/tables/deg_5utr_profiles.csv
+!/results/tables/deg_promoter_counts.csv
+!/results/tables/deg_promoter_profiles.csv
+!/results/tables/deseq2_results_DHX36KO_vs_WT.tsv
+!/results/tables/deseq2_results_dKO_vs_DHX36KO.tsv
+!/results/tables/deseq2_results_dKO_vs_FANCJKO.tsv
+!/results/tables/deseq2_results_dKO_vs_WT.tsv
+!/results/tables/deseq2_results_FANCJKO_vs_WT.tsv
+!/results/tables/feature_topology_profiles.csv
+!/results/tables/feature_topology_profiles_1utr.csv
+!/results/tables/feature_total_profiles.csv
+!/results/tables/g4_detection_by_strand.tsv
+!/results/tables/g4_rloop_overlap.csv
+!/results/tables/g4_rloop_promoter_correlation_stats.csv
+!/results/tables/g4_rloop_stratified_profiles.csv
+!/results/tables/g4_rloop_violin_stats.csv
+!/results/tables/g4_score_stats.tsv
+!/results/tables/g4sp_control_benchmark.csv
+!/results/tables/go_enrichment_summary.tsv
+!/results/tables/lncrna_g4_counts.csv
+!/results/tables/lncrna_g4_deg_profiles.csv
+!/results/tables/lncrna_g4_gainloss_profiles.csv
+!/results/tables/lncrna_g4_global_profiles.csv
+!/results/tables/motif_count_distribution.csv
+!/results/tables/multiG4_expression_stats.csv
+!/results/tables/multiG4_promoter_counts.csv
+!/results/tables/peak_counts_per_region.tsv
+!/results/tables/peak_summary.csv
+!/results/tables/promoter_g4_expression_tests.csv
+!/results/tables/promoter_motif_profiles.csv
+!/results/tables/propensity_by_dependence.csv
+!/results/tables/propensity_by_feature.csv
+!/results/tables/propensity_crossvalidation.csv
+!/results/tables/region_fold_enrichment.tsv
+!/results/tables/region_signal_stats.tsv
+!/results/tables/rloop_differential_at_g4.csv
+!/results/tables/rloop_signal_by_topology.csv
+!/results/tables/sanity_metrics.csv
+!/results/tables/significant_DEG_union.tsv
+!/results/tables/strand_bias_relative.tsv
+!/results/tables/strand_bias_summary.tsv
+!/results/tables/topology_by_feature.csv
+!/results/tables/topology_composition.csv
+!/results/tables/topology_composition_compare.csv
+!/results/tables/topology_composition_tests.csv
+!/results/tables/topology_concordance.csv
+!/results/tables/topology_differential_summary.csv
+!/results/tables/topology_differential_tests.csv
+!/results/tables/topology_feature_tests.csv
+!/results/tables/topology_lost_enrichment.csv
+!/results/tables/topology_precision_sweep.csv
+!/results/tables/tss_topology_profiles.csv
+!/results/tables/tss_topology_profiles_norm.csv
+!/results/tables/unclassified_feature_enrichment.csv
+!/results/tables/unclassified_lowcomplexity.csv
+!/results/tables/unclassified_motif_enrichment.csv
+!/results/tables/unclassified_peak_profiles.csv
+!/results/tables/unclassified_peak_seqstats.csv
+!/results/tables/unclassified_repeat_enrichment.csv
+!/results/tables/volcano_label_genes.csv
+
+# --- Language / editor cruft ----------------------------------------------
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.claude/
+.DS_Store
+Thumbs.db

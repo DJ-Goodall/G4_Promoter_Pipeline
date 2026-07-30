@@ -1,0 +1,11 @@
+name,reported_topology,predicted_topology,p_parallel,p_antiparallel,p_hybrid,confidence,correct,note
+cMYC_Pu27,parallel,parallel,0.8736263736263736,0.03701420530688823,0.08935942106673815,0.8736263736263736,True,"c-MYC NHE III1; canonical parallel (NMR, K+)"
+cKIT1,parallel,parallel,0.7969893471992532,0.008803354826334039,0.19420729797441286,0.7969893471992532,True,"c-KIT promoter; parallel (NMR/X-ray, K+)"
+cKIT2,parallel,parallel,0.9130574971971056,0.04076049012467883,0.0461820126782157,0.9130574971971056,True,"c-KIT promoter; parallel (NMR, K+)"
+VEGF,parallel,parallel,0.7885579631937497,0.018959079836851564,0.1924829569693986,0.7885579631937497,True,"VEGF promoter; parallel (NMR, K+)"
+KRAS,parallel,parallel,0.989010989010989,0.0,0.01098901098901099,0.989010989010989,True,KRAS NHE; parallel (K+)
+HRAS,parallel,antiparallel,0.14417748487123666,0.6711350113974702,0.1846875037312931,0.6711350113974702,False,HRAS promoter; parallel (K+)
+BCL2_Pu39,parallel,hybrid,0.13111643716327143,0.0172518247019811,0.8516317381347475,0.8516317381347475,False,BCL2 P1 promoter; predominantly parallel (K+)
+Telomere_human,hybrid,hybrid,0.004384070283582935,0.3320223267304235,0.6635936029859937,0.6635936029859937,True,human telomeric (TTAGGG)4; hybrid (3+1) in K+ (condition-dependent)
+TBA,antiparallel,antiparallel,0.12187644288484624,0.8671345461261427,0.01098901098901099,0.8671345461261427,True,thrombin-binding aptamer; antiparallel chair-type
+Oxytricha_telomere,antiparallel,antiparallel,0.3791208791208791,0.4835164835164835,0.13736263736263737,0.4835164835164835,True,Oxytricha telomeric G4T4G4; antiparallel (condition-dependent)

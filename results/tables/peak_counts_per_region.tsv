@@ -1,0 +1,73 @@
+assay	assay_label	genotype	region	n
+G4_BG4	BG4 (G4)	WT	Promoter	7933
+G4_BG4	BG4 (G4)	WT	Enhancer (dELS)	12688
+G4_BG4	BG4 (G4)	WT	5'UTR	878
+G4_BG4	BG4 (G4)	WT	1st intron	12160
+G4_BG4	BG4 (G4)	WT	Gene body	33574
+G4_BG4	BG4 (G4)	WT	Intergenic	40043
+G4_BG4	BG4 (G4)	DHX36KO	Promoter	8417
+G4_BG4	BG4 (G4)	DHX36KO	Enhancer (dELS)	13325
+G4_BG4	BG4 (G4)	DHX36KO	5'UTR	942
+G4_BG4	BG4 (G4)	DHX36KO	1st intron	12302
+G4_BG4	BG4 (G4)	DHX36KO	Gene body	33756
+G4_BG4	BG4 (G4)	DHX36KO	Intergenic	39860
+G4_BG4	BG4 (G4)	FANCJKO	Promoter	7552
+G4_BG4	BG4 (G4)	FANCJKO	Enhancer (dELS)	11844
+G4_BG4	BG4 (G4)	FANCJKO	5'UTR	829
+G4_BG4	BG4 (G4)	FANCJKO	1st intron	11798
+G4_BG4	BG4 (G4)	FANCJKO	Gene body	32885
+G4_BG4	BG4 (G4)	FANCJKO	Intergenic	40997
+G4_BG4	BG4 (G4)	dKO	Promoter	8981
+G4_BG4	BG4 (G4)	dKO	Enhancer (dELS)	14332
+G4_BG4	BG4 (G4)	dKO	5'UTR	1023
+G4_BG4	BG4 (G4)	dKO	1st intron	12930
+G4_BG4	BG4 (G4)	dKO	Gene body	35793
+G4_BG4	BG4 (G4)	dKO	Intergenic	41120
+G4_BG4	BG4 (G4)	ERCCWT	Promoter	5154
+G4_BG4	BG4 (G4)	ERCCWT	Enhancer (dELS)	7090
+G4_BG4	BG4 (G4)	ERCCWT	5'UTR	512
+G4_BG4	BG4 (G4)	ERCCWT	1st intron	9957
+G4_BG4	BG4 (G4)	ERCCWT	Gene body	30440
+G4_BG4	BG4 (G4)	ERCCWT	Intergenic	55914
+G4_BG4	BG4 (G4)	ERCCKO	Promoter	6182
+G4_BG4	BG4 (G4)	ERCCKO	Enhancer (dELS)	9037
+G4_BG4	BG4 (G4)	ERCCKO	5'UTR	653
+G4_BG4	BG4 (G4)	ERCCKO	1st intron	11441
+G4_BG4	BG4 (G4)	ERCCKO	Gene body	31589
+G4_BG4	BG4 (G4)	ERCCKO	Intergenic	56078
+Rloop_S96	S9.6 (R-loop)	WT	Promoter	5947
+Rloop_S96	S9.6 (R-loop)	WT	Enhancer (dELS)	8577
+Rloop_S96	S9.6 (R-loop)	WT	5'UTR	565
+Rloop_S96	S9.6 (R-loop)	WT	1st intron	14757
+Rloop_S96	S9.6 (R-loop)	WT	Gene body	43901
+Rloop_S96	S9.6 (R-loop)	WT	Intergenic	88303
+Rloop_S96	S9.6 (R-loop)	DHX36KO	Promoter	6321
+Rloop_S96	S9.6 (R-loop)	DHX36KO	Enhancer (dELS)	9126
+Rloop_S96	S9.6 (R-loop)	DHX36KO	5'UTR	585
+Rloop_S96	S9.6 (R-loop)	DHX36KO	1st intron	14267
+Rloop_S96	S9.6 (R-loop)	DHX36KO	Gene body	42881
+Rloop_S96	S9.6 (R-loop)	DHX36KO	Intergenic	82523
+Rloop_S96	S9.6 (R-loop)	FANCJKO	Promoter	6007
+Rloop_S96	S9.6 (R-loop)	FANCJKO	Enhancer (dELS)	8617
+Rloop_S96	S9.6 (R-loop)	FANCJKO	5'UTR	598
+Rloop_S96	S9.6 (R-loop)	FANCJKO	1st intron	14678
+Rloop_S96	S9.6 (R-loop)	FANCJKO	Gene body	43824
+Rloop_S96	S9.6 (R-loop)	FANCJKO	Intergenic	88542
+Rloop_S96	S9.6 (R-loop)	dKO	Promoter	6464
+Rloop_S96	S9.6 (R-loop)	dKO	Enhancer (dELS)	9803
+Rloop_S96	S9.6 (R-loop)	dKO	5'UTR	652
+Rloop_S96	S9.6 (R-loop)	dKO	1st intron	14549
+Rloop_S96	S9.6 (R-loop)	dKO	Gene body	43864
+Rloop_S96	S9.6 (R-loop)	dKO	Intergenic	80707
+Rloop_S96	S9.6 (R-loop)	ERCCWT	Promoter	6184
+Rloop_S96	S9.6 (R-loop)	ERCCWT	Enhancer (dELS)	9628
+Rloop_S96	S9.6 (R-loop)	ERCCWT	5'UTR	676
+Rloop_S96	S9.6 (R-loop)	ERCCWT	1st intron	11419
+Rloop_S96	S9.6 (R-loop)	ERCCWT	Gene body	34657
+Rloop_S96	S9.6 (R-loop)	ERCCWT	Intergenic	59138
+Rloop_S96	S9.6 (R-loop)	ERCCKO	Promoter	5198
+Rloop_S96	S9.6 (R-loop)	ERCCKO	Enhancer (dELS)	7841
+Rloop_S96	S9.6 (R-loop)	ERCCKO	5'UTR	534
+Rloop_S96	S9.6 (R-loop)	ERCCKO	1st intron	9832
+Rloop_S96	S9.6 (R-loop)	ERCCKO	Gene body	30764
+Rloop_S96	S9.6 (R-loop)	ERCCKO	Intergenic	52738

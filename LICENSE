@@ -1,0 +1,36 @@
+MIT License
+
+Copyright (c) 2026 Daniel J. Goodall
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+The MIT terms above cover the workflow code in this repository (Snakefile,
+config/, scripts/, envs/ and the documentation).
+
+The derived data products distributed alongside the code — the summary tables
+in results/tables/ and the figures in docs/figures/ — are released under the
+Creative Commons Attribution 4.0 International licence (CC-BY-4.0,
+https://creativecommons.org/licenses/by/4.0/).
+
+Third-party software invoked by this workflow (DeepG4, G4ShapePredictor,
+pqsfinder, Bioconductor packages) and third-party reference data (GENCODE,
+ENCODE SCREEN, UCSC RepeatMasker, JASPAR) are neither included nor
+redistributed here; they carry their own licences. See THIRD_PARTY.md.
