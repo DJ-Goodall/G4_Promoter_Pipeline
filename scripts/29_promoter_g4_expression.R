@@ -53,6 +53,10 @@ ov_df <- data.frame(prom_i = S4Vectors::queryHits(ov),
 prom_df <- data.frame(entrez = prom_entrez, g4_topology = "no_G4", stringsAsFactors = FALSE)
 prom_df$g4_topology[ov_df$prom_i] <- ov_df$topology
 prom_df$g4_topology[prom_df$g4_topology == "no_canonical_PQS"] <- "no_PQS_G4"
+# v1.1: "mixed" (G4ShapePredictor declined to call) is a real stratum now that
+# rule 21 no longer back-fills it with the loop heuristic. It is carried as its
+# own level below -- if it were left out of the factor it would silently become
+# NA and those promoters would vanish from every test in this script.
 
 # --- Map Entrez -> SYMBOL and join DESeq2 ----------------------------------
 prom_df$symbol <- AnnotationDbi::mapIds(org.Mm.eg.db, keys = prom_df$entrez,
@@ -65,7 +69,7 @@ expr <- de %>% inner_join(prom_df, by = c("gene_name" = "symbol")) %>%
   mutate(abs_log2FC = abs(log2FC),
          g4_topology = factor(g4_topology,
                               levels = c("parallel", "antiparallel", "hybrid",
-                                         "no_PQS_G4", "no_G4")),
+                                         "mixed", "no_PQS_G4", "no_G4")),
          ko = factor(ko, levels = kos))
 readr::write_csv(expr, "results/tables/promoter_g4_expression.csv")
 
@@ -95,7 +99,8 @@ p_expr <- ggplot(expr %>% filter(is.finite(abs_log2FC)),
   facet_wrap(~ ko) +
   coord_cartesian(ylim = c(0, quantile(expr$abs_log2FC, 0.97, na.rm = TRUE))) +
   scale_fill_manual(values = c(parallel = "#1B9E77", antiparallel = "#D95F02",
-                               hybrid = "#7570B3", no_PQS_G4 = "grey75", no_G4 = "grey55"),
+                               hybrid = "#7570B3", mixed = "#E7B416",
+                               no_PQS_G4 = "grey75", no_G4 = "grey55"),
                     guide = "none") +
   labs(x = NULL, y = "|log2 fold-change| (KO vs WT)",
        title = "Gene dysregulation by promoter-G4 topology",

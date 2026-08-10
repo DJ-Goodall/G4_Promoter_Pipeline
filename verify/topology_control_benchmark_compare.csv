@@ -1,0 +1,11 @@
+"name","reported","g4sp","g4sp_ok","heuristic","heur_ok","loops","pqs_score"
+"cMYC_Pu27","parallel","parallel",TRUE,"parallel",TRUE,"1/0/1",75
+"cKIT1","parallel","parallel",TRUE,"antiparallel",FALSE,"1/4/4",64
+"cKIT2","parallel","parallel",TRUE,"hybrid",FALSE,"1/5/1",67
+"VEGF","parallel","parallel",TRUE,"parallel",TRUE,"1/0/1",95
+"KRAS","parallel","parallel",TRUE,"hybrid",FALSE,"1/2/4",71
+"HRAS","parallel","antiparallel",FALSE,"antiparallel",FALSE,"4/4/3",61
+"BCL2_Pu39","parallel","hybrid",FALSE,"hybrid",FALSE,"3/5/3",61
+"Telomere_human","hybrid","hybrid",TRUE,"parallel",FALSE,"3/3/3",64
+"TBA","antiparallel","antiparallel",TRUE,"parallel",FALSE,"2/3/2",27
+"Oxytricha_telomere","antiparallel","antiparallel",TRUE,"no_PQS",FALSE,"NA/NA/NA",NA

@@ -2,11 +2,34 @@
 # ============================================================================
 # 28_assign_motif_topology.R   (env: r_g4)   --- Phase 13 (all-PQS) ---
 #
-# Combine the per-motif G4ShapePredictor calls (rule g4sp_topology_all, which runs
-# the unchanged 04 script with motif ids in the peak_id column) with the per-motif
-# pqsfinder loop heuristic (rule 27) into one final topology per motif. Same rule
-# as 05: take G4SP where it gives a definite class, else the loop heuristic. Every
-# motif is PQS+ by construction, so there is no "no_canonical_PQS" bucket here.
+# Assign one topology per PQS motif from the per-motif G4ShapePredictor calls
+# (rule g4sp_topology_all, which runs the unchanged 20 script with motif ids in
+# the peak_id column), and report concordance with the per-motif pqsfinder loop
+# heuristic (rule 27). Every motif is PQS+ by construction, so there is no
+# "no_canonical_PQS" bucket here.
+#
+# ---------------------------------------------------------------------------
+# v1.1 (2026-08-07 audit): this script carried the SAME back-fill as rule 21 --
+#
+#     topology_final = case_when(
+#       g4sp_definite              ~ topology_g4sp,
+#       !is.na(topology_heuristic) ~ topology_heuristic,   # <- removed in v1.1
+#       TRUE                       ~ "unclassified")
+#
+# The audit named rule 21, but the motif level has to move with it. These two
+# tables are compared directly against each other in
+# 44_peak_motif_distributions.R (figure topology_composition_motif_vs_peak,
+# table topology_composition_compare.csv), which asks whether counting every
+# motif shifts the parallel-dominated peak-level picture. De-chimerising only
+# the peak arm would answer that question with one arm of pure G4SP calls and
+# one arm still 87%-heuristic -- a worse comparison than leaving both alone.
+#
+# So: G4SP's abstentions stay "mixed" here too. The heuristic call is still
+# computed and kept in its own column for concordance, but never becomes the
+# reported topology. Evidence: on the 10 literature control quadruplexes G4SP
+# scores 8/10 and the loop heuristic 2/10, below the 33% expected from guessing
+# at three classes (26d_heuristic_control_benchmark.R).
+# ---------------------------------------------------------------------------
 #
 # Inputs:   results/tables/motif_catalog.csv          (rule 27; topology_heuristic)
 #           results/tables/motif_g4sp_topology.csv     (04 on motif ids)
@@ -34,14 +57,16 @@ merged <- cat_df %>%
   left_join(select(g4sp, motif_id, topology_g4sp, g4sp_confidence), by = "motif_id") %>%
   mutate(
     g4sp_definite = topology_g4sp %in% definite,
+    # v1.1: NO heuristic back-fill (see header). "mixed" = G4SP returned a call
+    # but declined to commit to a class; "unclassified" = no G4SP row at all.
     topology_final = case_when(
-      g4sp_definite              ~ topology_g4sp,
-      !is.na(topology_heuristic) ~ topology_heuristic,
-      TRUE                       ~ "unclassified"),
+      g4sp_definite            ~ topology_g4sp,
+      !is.na(topology_g4sp)    ~ "mixed",
+      TRUE                     ~ "unclassified"),
     topology_source = case_when(
-      g4sp_definite              ~ "g4sp",
-      !is.na(topology_heuristic) ~ "heuristic",
-      TRUE                       ~ "none"),
+      g4sp_definite            ~ "g4sp",
+      !is.na(topology_g4sp)    ~ "g4sp_abstained",
+      TRUE                     ~ "none"),
     agree = g4sp_definite & !is.na(topology_heuristic) &
             (topology_g4sp == topology_heuristic))
 

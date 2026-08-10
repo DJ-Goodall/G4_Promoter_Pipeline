@@ -36,8 +36,7 @@ half_width <- cfg$metaprofile$half_width
 n_bins     <- cfg$metaprofile$n_bins
 incl_none  <- isTRUE(cfg$metaprofile$include_none_group)
 max_group  <- cfg$metaprofile$max_per_group %||% 8000
-definite   <- c("parallel", "antiparallel", "hybrid")
-keep_groups <- c(definite, if (incl_none) "none")
+definite   <- topology_definite            # v1.1: shared, was a local copy
 
 feature_regions <- as.character(unlist(cfg$metaprofile$feature_regions %||%
                                        c("5UTR", "intron1", "enhancer")))
@@ -46,6 +45,12 @@ region_files <- cfg$feature$region_files
 union <- readRDS("cache/peaks.rds")$union
 topo  <- readr::read_csv("results/tables/peak_topology.csv", show_col_types = FALSE)
 union$topology <- as.character(topo$topology_final[match(names(union), topo$peak_id)])
+
+# v1.1: displayed facets depend on the labels actually present -- "mixed" is a
+# terminal stratum now that rule 21 no longer back-fills G4SP's abstentions, and
+# a hard-coded c(definite, "none") would drop those regions silently rather than
+# route them anywhere. See topology_keep_groups() in helpers.R.
+keep_groups <- topology_keep_groups(union$topology, incl_none)
 
 # --- Build topology-labelled, centre-anchored windows per feature -----------
 set.seed(7)
@@ -118,8 +123,7 @@ present <- intersect(feature_regions, names(region_windows))   # keep config row
 profiles$region_label <- factor(
   unname(region_labels_map[as.character(profiles$region)]),
   levels = unname(region_labels_map[present]))
-group_labels <- c(setNames(topology_labels[match(definite, topology_levels)], definite),
-                  none = "No G4 peak")
+group_labels <- topology_group_labels(keep_groups)
 
 # Layers shared by both figures (only the facet scaling / title differ).
 base_layers <- list(

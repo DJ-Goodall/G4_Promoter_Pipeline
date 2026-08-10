@@ -105,8 +105,14 @@ peak_comp <- data.frame(level = "Per peak (top PQS)",
   filter(!is.na(topology)) %>% count(level, topology, name = "n")
 comp <- bind_rows(motif_comp, peak_comp) %>%
   group_by(level) %>% mutate(pct = 100 * n / sum(n)) %>% ungroup()
-comp$topology <- factor(comp$topology,
-                        levels = c(definite, "no_canonical_PQS", "unclassified"))
+# v1.1: "mixed" must be a level here. Rule 21 no longer back-fills G4SP's
+# abstentions, so both the motif- and peak-level calls can carry it -- and if it
+# were left out, factor() would turn those rows into NA, drop them from the
+# stacked bar, and quietly renormalise the percentages of the remaining classes
+# over a smaller denominator. This table is exactly the one used to measure the
+# v1.0 back-fill shares (87% of hybrid, 66% of antiparallel), so its
+# denominators have to be right.
+comp$topology <- factor(comp$topology, levels = c(topology_levels, "unclassified"))
 readr::write_csv(comp, "results/tables/topology_composition_compare.csv")
 
 topo_pal <- c(topology_palette, unclassified = "grey50")

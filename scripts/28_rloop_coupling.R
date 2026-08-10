@@ -33,7 +33,13 @@ fig_root <- "results/figures"
 genotypes <- cfg$genotypes
 ref_geno  <- cfg$ref_genotype
 kos       <- setdiff(genotypes, ref_geno)
-definite  <- c("parallel", "antiparallel", "hybrid")
+definite  <- topology_definite             # v1.1: shared, was a local copy
+# v1.1: every stratum that gets REPORTED, as opposed to the three that get
+# statistically TESTED. "mixed" (G4SP declined to call) is terminal now that
+# rule 21 no longer back-fills it, so the descriptive panels must show it --
+# the old c(definite, "no_canonical_PQS") filter would have dropped ~22% of
+# PQS-bearing peaks out of the fractions and the violins without saying so.
+reported  <- topology_levels
 topo_lab  <- setNames(topology_labels, topology_levels)
 
 union <- readRDS("cache/peaks.rds")$union
@@ -53,7 +59,7 @@ ov_df <- data.frame(peak_id = names(union),
   left_join(prop %>% select(peak_id, deepg4_prob), by = "peak_id")
 
 # by topology
-by_topo <- ov_df %>% filter(topology %in% c(definite, "no_canonical_PQS")) %>%
+by_topo <- ov_df %>% filter(topology %in% reported) %>%
   group_by(group_type = "topology", group = topology) %>%
   summarise(n = dplyr::n(), n_rloop_pos = sum(rloop_pos),
             frac_rloop_pos = mean(rloop_pos), .groups = "drop")
@@ -96,13 +102,13 @@ evict_bigwigs(wt_files)
 sig_df <- data.frame(peak_id = names(union),
                      topology = factor(as.character(union$topology), levels = topology_levels),
                      rloop_signal_WT = rloop_sig, stringsAsFactors = FALSE)
-sig_summ <- sig_df %>% filter(topology %in% c(definite, "no_canonical_PQS")) %>%
+sig_summ <- sig_df %>% filter(topology %in% reported) %>%
   group_by(topology) %>%
   summarise(median = median(rloop_signal_WT, na.rm = TRUE),
             mean = mean(rloop_signal_WT, na.rm = TRUE), n = dplyr::n(), .groups = "drop")
 readr::write_csv(sig_summ, "results/tables/rloop_signal_by_topology.csv")
 
-p_sig <- ggplot(sig_df %>% filter(topology %in% c(definite, "no_canonical_PQS"),
+p_sig <- ggplot(sig_df %>% filter(topology %in% reported,
                                   is.finite(rloop_signal_WT)),
                 aes(topology, log1p(rloop_signal_WT), fill = topology)) +
   geom_violin(scale = "width", trim = TRUE, alpha = 0.8, colour = "grey30") +

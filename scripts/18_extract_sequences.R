@@ -8,10 +8,15 @@
 #     midpoint): peaks here are 500 bp - 5.5 kb wide, so a midpoint window usually
 #     misses the G4 motif. Fall back to the peak centre for peaks with no PQS.
 # (c) Build a GC/length-matched random genomic background (DeepG4 AUROC negatives).
+# (d) [v1.1] Build a second UNMATCHED background, and report realised-vs-target
+#     GC bin counts, so a weak AUROC can be attributed to either aggressive GC
+#     matching or a noisy peak set rather than left ambiguous.
 #
 # Inputs:   cache/peaks.rds
 # Outputs:  cache/peak_seqs_201bp.fa
 #           cache/background_seqs.fa
+#           cache/background_seqs_unmatched.fa           [v1.1]
+#           results/tables/background_gc_matching.csv    [v1.1]
 #           cache/peak_pqs_n<N>.rds   (cache keyed on peak count, auto-invalidates)
 #           results/tables/peak_pqs.csv   (peak_id, has_pqs, pqs_seq, score, nt,
 #                                          ll1, ll2, ll3, strand, pqs_center, ...)
@@ -165,3 +170,44 @@ bg_seqs <- pool_seqs[sel_idx]
 names(bg_seqs) <- sprintf("bg_%06d", seq_along(bg_seqs))
 write_fasta(bg_seqs, "cache/background_seqs.fa")
 message("Background sequences written: ", length(bg_seqs))
+
+# --- v1.1: report realised vs target GC matching ----------------------------
+# `take <- min(length(avail), target[[b]])` truncates SILENTLY when the uniform
+# genomic pool cannot supply a GC bin. The pool is drawn uniformly (weighted
+# only by chromosome length), so the highest-GC bins of the peak distribution
+# are exactly the ones it under-supplies -- i.e. the background is weakest
+# precisely where G4s live. v1.0 emitted no diagnostic, so a silently
+# under-matched background was indistinguishable from a matched one.
+match_report <- data.frame(
+  gc_bin = seq_len(length(brks) - 1),
+  gc_lower = brks[-length(brks)], gc_upper = brks[-1],
+  target_n = as.integer(target),
+  realised_n = as.integer(table(factor(pool_bin[sel_idx],
+                                       levels = seq_len(length(brks) - 1)))))
+match_report$shortfall <- match_report$target_n - match_report$realised_n
+readr::write_csv(match_report, "results/tables/background_gc_matching.csv")
+if (any(match_report$shortfall > 0)) {
+  worst <- match_report[which.max(match_report$shortfall), ]
+  warning(sprintf(paste0(
+    "GC-matched background is under-supplied in %d of %d bins (%d sequences short ",
+    "of %d requested). Worst bin: GC %.3f-%.3f, %d/%d. Under-matching ",
+    "concentrates at high GC, which biases the DeepG4 AUROC. See ",
+    "results/tables/background_gc_matching.csv."),
+    sum(match_report$shortfall > 0), nrow(match_report),
+    sum(match_report$shortfall), bg_n,
+    worst$gc_lower, worst$gc_upper, worst$realised_n, worst$target_n))
+}
+
+# --- v1.1: second, UNMATCHED background arm ---------------------------------
+# The audit asks whether GC matching is so aggressive that it removes the
+# signal -- GC content drives both DeepG4 score and BG4 occupancy, so matching
+# on it may match away the biology. That is a testable alternative to "many of
+# the peaks are not G4 sites", and it needs an unmatched comparator. Scoring
+# both and reporting two AUROCs separates the two readings.
+unm_n <- min(bg_n, length(pool_seqs))
+set.seed(bg_seed + 1L)
+unm_seqs <- pool_seqs[sample(length(pool_seqs), unm_n)]
+names(unm_seqs) <- sprintf("bgu_%06d", seq_along(unm_seqs))
+write_fasta(unm_seqs, "cache/background_seqs_unmatched.fa")
+message("Unmatched background sequences written: ", length(unm_seqs),
+        " (uniform genomic draw, peaks excluded, no GC matching)")

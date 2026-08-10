@@ -128,14 +128,20 @@ pair_df <- data.frame(prom_i = S4Vectors::subjectHits(ov),
                       topology = motif_topo[S4Vectors::queryHits(ov)],
                       stringsAsFactors = FALSE)
 pair_df$bucket <- prom_df$bucket[pair_df$prom_i]
-comp <- pair_df %>% filter(topology %in% definite, bucket != "0") %>%
+# v1.1: this is a COMPOSITION figure, so the denominator has to include every
+# motif. Restricting to the three definite classes would renormalise the shares
+# over G4SP's confident calls only and hide how much of each bucket is
+# unresolved -- which under v1.1 is a substantial fraction, since rule 43 no
+# longer back-fills abstentions with the loop heuristic.
+comp <- pair_df %>% filter(topology %in% topology_levels, bucket != "0") %>%
   count(bucket, topology, name = "n") %>%
   group_by(bucket) %>% mutate(pct = 100 * n / sum(n)) %>% ungroup()
-comp$topology <- factor(comp$topology, levels = definite)
+comp$topology <- factor(comp$topology, levels = topology_levels)
+comp <- comp[!is.na(comp$topology), ]
 p_comp <- ggplot(comp, aes(bucket, pct, fill = topology)) +
   geom_col(colour = "grey20", linewidth = 0.2) +
-  scale_fill_manual(values = topology_palette,
-                    labels = setNames(topology_labels[match(definite, topology_levels)], definite),
+  scale_fill_manual(values = topology_palette, drop = TRUE,
+                    labels = setNames(topology_labels, topology_levels),
                     name = "Topology") +
   labs(x = "G4 motifs in promoter", y = "Motif topology share (%)",
        title = "Topology mix of motifs in multi-G4 promoters",

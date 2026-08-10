@@ -79,7 +79,21 @@ peak_calling:
   z_thresh: 2
   min_replicates: 2                   # G4 has 3 reps -> 2; R-loop 2 -> 2
   gap_bp: 500
-  min_width: 500
+  # v1.1 (2026-08-07 audit): WAS 500, i.e. exactly bin_size, which made the
+  # width filter inert -- every merged seed is already >= one bin wide.
+  # Requiring two bins means a peak must be supported by more than a single
+  # 500 bp window.
+  min_width: 1000
+  # v1.1 NEW. Z-score each replicate independently and require z >= z_thresh in
+  # >= min_replicates of them, instead of z-scoring the replicate MEAN once and
+  # separately checking "coverage > 0 in >= 2 replicates" (which at CUT&Tag
+  # depth is close to a no-op, so one strong replicate could carry a bin).
+  # Set false to reproduce v1.0 exactly.
+  #
+  # Evidence this matters: under the v1.0 rule the ERCC CONTROL tracks yield
+  # MORE peaks than the real samples (G4_BG4_ERCCKO 114,980 vs G4_BG4_WT
+  # 107,276) -- a relative global z has no null in which a peak can fail.
+  z_per_replicate: true
   assays: [G4_BG4, Rloop_S96]
   # full genotype set incl. ERCC controls (main + ERCC unions built separately)
   genotypes: [WT, DHX36KO, FANCJKO, dKO, ERCCWT, ERCCKO]
@@ -122,7 +136,34 @@ integration:
 # ---- Stage L: strand asymmetry (g4_gloop_strand_analysis.Rmd s1-s8) -------
 strand:
   window_sizes: [250, 500]            # +/- bp around peak centre for G4Hunter
-  g4_threshold: 0.0                   # custom G4Hunter net-G-richness cutoff
+  # v1.1 (2026-08-07 audit): WAS 0.0, which made `has_g4_motif = abs(score) >= 0`
+  # TRUE for every row -- g4_detection_by_strand.tsv read 100% in all 32 rows
+  # and could not report anything.
+  #
+  # The audit asked for "a real G4Hunter cutoff (1.2 conventional, 1.5
+  # stringent)". Neither works here, for two DIFFERENT reasons, both measured
+  # (verify/test_g4hunter.R, verify/calibrate_g4_threshold.R):
+  #
+  #   - Against the v1.0 WINDOW-MEAN statistic, 1.2 calls nothing: observed
+  #     scores span 0.088-0.153 and 0/10 literature control G4s pass. The table
+  #     would have broken in the opposite direction.
+  #   - Against the v1.1 SLIDING-25nt-MAX statistic, 1.2 is far too permissive
+  #     as a per-window classifier: measured against 5,000 random mm10 windows
+  #     the false-positive rate is 0.441 at 501 bp and 0.635 at 1001 bp
+  #     (1.5 gives 0.230 / 0.396). The published cutoffs are genome-SCANNING
+  #     thresholds for locating candidate sites, not per-locus decisions.
+  #
+  # So the threshold is CALIBRATED per window size to a stated false-positive
+  # rate. Leave null to calibrate; set a number to override and skip
+  # calibration (the FPR is then unknown and is reported as such).
+  # Calibrated values on mm10: window_size 250 (501 bp) -> ~2.28;
+  # window_size 500 (1001 bp) -> ~2.60. They differ because a max over more
+  # windows is a larger extreme value, which is why one fixed number cannot
+  # serve both sizes.
+  g4_threshold: null
+  g4_threshold_fpr: 0.05              # target FPR vs random mm10 windows
+  calib_n: 5000                       # background windows drawn per window size
+  calib_seed: 2026
   subsample: 2000                     # peaks/genotype (promoter + 5'UTR only)
   seed: 2026
   region_types: [promoter, 5UTR]
@@ -163,7 +204,23 @@ g4sp:
   conda_env: "g4sp"
   model: "RandomForest (default).pkl"
   threshold_file: "(precision)optimized_threshold.pkl"
+  # UNCHANGED at 0.80, but in v1.1 the MEANING changed: script 21 no longer
+  # back-fills G4SP's abstentions with the loop-length heuristic, so this now
+  # genuinely controls how many peaks land in the terminal "mixed" stratum
+  # rather than how many silently get a heuristic label.
+  # From topology_precision_sweep.csv:
+  #   default -> n_mixed =      0  (argmax; no abstention), 11,062 hybrid
+  #   0.75    -> n_mixed =  6,090  (4.7%),                   7,912 hybrid
+  #   0.80    -> n_mixed = 29,225  (22.3%),                  1,879 hybrid  <- primary
+  #   0.85    -> n_mixed = 64,960  (49.6%),                     37 hybrid
+  # Hybrid is by far the least confident G4SP class and collapses fastest, so
+  # the choice of precision IS the choice of how big the hybrid stratum is.
   precision: 0.80
+  # v1.1 NEW: the confidence-stratified sensitivity arm. Script 21b recomputes
+  # topology at this setting from the per-class probabilities already in
+  # g4sp_topology.csv (plain argmax, no G4SP re-inference), so the
+  # "hybrid > parallel > antiparallel" TSS ordering can be reported both ways.
+  sensitivity_precision: default
 
 # ---- Loop-length topology heuristic ---------------------------------------
 heuristic:
@@ -272,7 +329,11 @@ g4_rloop_cooccurrence:
 unclassified:
   rmsk_url: "https://hgdownload.gi.ucsc.edu/goldenPath/mm10/database/rmsk.txt.gz"
   rmsk_local: "data/rmsk_mm10.txt.gz"
-  subsample: 16980
+  # v1.1 (2026-08-07 audit): WAS 16980 -- a hard-coded literal that happened to
+  # equal the observed no_canonical_PQS peak count of the v1.0 run. A
+  # run-specific magic number, not a parameter: any change upstream silently
+  # desynchronised it. null now means "use all no-PQS peaks" (script 37).
+  subsample: null
   motif_pcut: 5.0e-5
   jaspar_tax: "vertebrates"
 

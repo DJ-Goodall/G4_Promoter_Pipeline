@@ -39,14 +39,17 @@ half_width <- cfg$metaprofile$half_width
 n_bins     <- cfg$metaprofile$n_bins
 incl_none  <- isTRUE(cfg$metaprofile$include_none_group)
 max_group  <- cfg$metaprofile$max_per_group %||% 8000
-definite   <- c("parallel", "antiparallel", "hybrid")
-keep_groups <- c(definite, if (incl_none) "none")
+definite   <- topology_definite            # v1.1: shared, was a local copy
 feature_regions <- as.character(unlist(cfg$metaprofile$feature_regions %||%
                                        c("promoter", "5UTR", "intron1", "enhancer")))
 
 union <- readRDS("cache/peaks.rds")$union
 topo  <- readr::read_csv("results/tables/peak_topology.csv", show_col_types = FALSE)
 union$topology <- as.character(topo$topology_final[match(names(union), topo$peak_id)])
+
+# v1.1: see topology_keep_groups() in helpers.R -- "mixed" must be displayed
+# when populated, not silently dropped out of the denominator.
+keep_groups <- topology_keep_groups(union$topology, incl_none)
 
 # --- Collapsed-5'UTR windows (one TSS-proximal fragment per gene) -----------
 set.seed(7)
@@ -116,8 +119,7 @@ present <- intersect(feature_regions, unique(as.character(profiles$region)))
 profiles$region_label <- factor(
   unname(region_labels_map[as.character(profiles$region)]),
   levels = unname(region_labels_map[present]))
-group_labels <- c(setNames(topology_labels[match(definite, topology_levels)], definite),
-                  none = "No G4 peak")
+group_labels <- topology_group_labels(keep_groups)
 
 base_layers <- list(
   geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA),

@@ -4,12 +4,39 @@
 #
 # DeepG4-vs-peak-strength is uninformative (DeepG4 is a saturating classifier).
 # Instead:
-#   (a) Cross-validate three INDEPENDENT sequence G4-propensity metrics on our
-#       data: DeepG4 probability, pqsfinder score, G4Hunter score. High agreement
-#       validates all three; this replaces the strength scatter.
+#   (a) Cross-compare four sequence G4-propensity metrics on our data: DeepG4
+#       probability, pqsfinder score, G4Hunter on the PQS subsequence, and
+#       G4Hunter averaged over the whole 201 bp window.
 #   (b) Propensity vs helicase-dependence: are peaks LOST upon KO different in
 #       intrinsic G4 propensity than stable/gained peaks? (Do the helicases act
 #       on the strongest predicted G4s?)
+#
+# ---------------------------------------------------------------------------
+# v1.1 NOTE (2026-08-07 audit): the v1.0 header claimed "High agreement
+# validates all three". The committed table does not show that, and the header
+# should not have said it. What the table actually shows
+# (propensity_crossvalidation.csv):
+#
+#     pqsfinder    vs g4hunter_pqs   rho = 0.635
+#     deepg4       vs pqsfinder      rho = 0.441
+#     deepg4       vs g4hunter_pqs   rho = 0.330
+#     g4hunter_win vs pqsfinder      rho = 0.00035     <- ~zero
+#     g4hunter_win vs deepg4         rho = 0.021       <- ~zero
+#
+# The audit called g4hunter_win "dead" and asked for it to be replaced with a
+# max-over-sliding-25nt score or dropped. It should be neither, because the
+# fixed metric ALREADY EXISTS in the same table: g4hunter_pqs is G4Hunter
+# restricted to the PQS, and it behaves exactly as expected (rho 0.635 with
+# pqsfinder). g4hunter_win is the same score averaged over 201 bp, and its
+# near-zero correlation IS the demonstration that a window mean dilutes a
+# ~25 nt motif into noise -- the identical failure mode fixed in
+# 48_strand_asymmetry.R. Keeping the pair side by side is informative; what
+# was wrong was calling the result "high agreement". g4hunter_win is now
+# labelled a dilution control in the output and on the figure.
+#
+# The three motif-restricted metrics agree moderately (rho 0.33-0.64), which
+# is a fair statement. It is not validation of a window-averaged score.
+# ---------------------------------------------------------------------------
 #
 # Also writes results/tables/propensity_metrics.csv (peak_id + all metrics +
 # topology), reused by rules 11 (feature) and 12 (R-loop).
@@ -58,10 +85,12 @@ prop <- topo %>%
   left_join(g4h_win, by = "peak_id")
 readr::write_csv(prop, "results/tables/propensity_metrics.csv")
 
-# --- (a) Cross-validation among the three metrics --------------------------
+# --- (a) Cross-comparison among the metrics ---------------------------------
+# v1.1: g4hunter_win is labelled for what it is -- a dilution control, not a
+# fourth independent measure of propensity. See the header note.
 metric_cols <- c(deepg4_prob = "DeepG4 prob",
                  pqsfinder_score = "pqsfinder score",
-                 g4hunter_win = "G4Hunter (201bp)",
+                 g4hunter_win = "G4Hunter 201bp mean\n(dilution control)",
                  g4hunter_pqs = "G4Hunter (PQS)")
 M <- as.matrix(prop[, names(metric_cols)])
 cmat <- suppressWarnings(cor(M, method = "spearman", use = "pairwise.complete.obs"))
@@ -77,8 +106,10 @@ p_heat <- ggplot(cv_long2, aes(metric_a, metric_b, fill = spearman_rho)) +
   geom_text(aes(label = sprintf("%.2f", spearman_rho)), size = 3.5) +
   scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B",
                        midpoint = 0, limits = c(-1, 1), name = "Spearman") +
-  labs(x = NULL, y = NULL, title = "Cross-validation of G4-propensity metrics",
-       subtitle = "Three independent sequence measures over the same peaks") +
+  labs(x = NULL, y = NULL, title = "Cross-comparison of G4-propensity metrics",
+       subtitle = paste("Motif-restricted measures agree moderately (rho 0.33-0.64).",
+                        "\nThe 201 bp window mean is included as a dilution control:",
+                        "averaging a ~25 nt\nmotif over 201 bp drives rho to ~0.")) +
   theme_pub() + theme(axis.text.x = element_text(angle = 25, hjust = 1))
 
 # Representative scatter: DeepG4 vs G4Hunter (on the PQS — the window-G4Hunter is

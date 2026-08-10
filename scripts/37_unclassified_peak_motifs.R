@@ -37,6 +37,11 @@ fig_root <- "results/figures"
 union <- readRDS("cache/peaks.rds")$union
 topo  <- readr::read_csv("results/tables/peak_topology.csv", show_col_types = FALSE)
 union$topology <- as.character(topo$topology_final[match(names(union), topo$peak_id)])
+# v1.1: this dichotomy is 'has a canonical PQS' vs 'does not', which is still
+# the right split for this script -- but note that under v1.1 the 'classified'
+# side now includes the 'mixed' stratum, i.e. peaks with a PQS that
+# G4ShapePredictor declined to assign a topology. They are classified as
+# G4-forming, not as a topology. See 21_assign_topology.R.
 union$class2 <- ifelse(union$topology == "no_canonical_PQS", "unclassified", "classified")
 
 peak_seqs <- Biostrings::readDNAStringSet("cache/peak_seqs_201bp.fa")
@@ -45,7 +50,11 @@ cl <- union$class2[match(names(peak_seqs), names(union))]
 
 set.seed(7)
 cap <- function(x, n) if (length(x) > n) x[sample(length(x), n)] else x
-sub <- cfg$unclassified$subsample %||% 16980
+# v1.1 (2026-08-07 audit): the fallback was the literal 16980, which happened to
+# equal the no-PQS peak count of the v1.0 run. Setting the config key to null
+# therefore did NOT remove the magic number -- it restored it. null now means
+# "use every no-PQS peak", so the cap is opt-in rather than baked in.
+sub <- cfg$unclassified$subsample %||% sum(cl == "unclassified", na.rm = TRUE)
 unc <- cap(peak_seqs[which(cl == "unclassified")], sub)
 cla <- cap(peak_seqs[which(cl == "classified")], length(unc))   # equal n to no-PQS
 bg  <- cap(bg_seqs, length(unc))

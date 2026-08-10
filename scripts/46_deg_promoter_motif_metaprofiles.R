@@ -40,7 +40,14 @@ dir_cols   <- c(up = "#E41A1C", down = "#377EB8")
 dir_labels <- c(up = "Upregulated", down = "Downregulated")
 
 pm <- readRDS("cache/promoter_motif_signal.rds")          # rule 30 cache
+# v1.1: definite-only is deliberate (see rule 45) -- a topology-resolved grid
+# cannot include motifs G4SP declined to assign. Reported, not silent, because
+# rule 43 no longer back-fills those abstentions.
+n_pre <- nrow(pm)
 pm <- pm[pm$topology %in% definite, ]
+message(sprintf(
+  "Motifs profiled: %d / %d (%.1f%% excluded as mixed/unclassified)",
+  nrow(pm), n_pre, 100 * (1 - nrow(pm) / max(n_pre, 1))))
 pm$symbol <- AnnotationDbi::mapIds(org.Mm.eg.db, keys = as.character(pm$prom_entrez),
                                    column = "SYMBOL", keytype = "ENTREZID", multiVals = "first")
 pm <- pm[!is.na(pm$symbol), ]

@@ -59,6 +59,11 @@ group_cols    <- c("No canonical PQS" = "#E41A1C",
 union <- readRDS("cache/peaks.rds")$union
 topo  <- readr::read_csv("results/tables/peak_topology.csv", show_col_types = FALSE)
 union$topology <- as.character(topo$topology_final[match(names(union), topo$peak_id)])
+# v1.1: this dichotomy is 'has a canonical PQS' vs 'does not', which is still
+# the right split for this script -- but note that under v1.1 the 'classified'
+# side now includes the 'mixed' stratum, i.e. peaks with a PQS that
+# G4ShapePredictor declined to assign a topology. They are classified as
+# G4-forming, not as a topology. See 21_assign_topology.R.
 union$class2 <- ifelse(union$topology == unclassified_lvl, "unclassified", "classified")
 GenomeInfoDb::seqlevelsStyle(union) <- "UCSC"
 union <- GenomeInfoDb::keepSeqlevels(

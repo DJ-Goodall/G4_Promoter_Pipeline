@@ -60,7 +60,10 @@ for (i in seq_len(nrow(peak_combos))) {
     p <- call_peaks_from_bigwigs(
       bws, chrom_sizes = chrom_sizes,
       bin_size = pk$bin_size, z_thresh = pk$z_thresh,
-      min_replicates = min_rep, gap_bp = pk$gap_bp, min_width = pk$min_width)
+      min_replicates = min_rep, gap_bp = pk$gap_bp, min_width = pk$min_width,
+      # v1.1: forward the per-replicate z flag. Without this the config key
+      # peak_calling.z_per_replicate would be silently inert.
+      z_per_replicate = isTRUE(pk$z_per_replicate))
     S4Vectors::mcols(p)$assay <- a; S4Vectors::mcols(p)$genotype <- g
     p
   })

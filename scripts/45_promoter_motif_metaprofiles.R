@@ -99,7 +99,15 @@ saveRDS(pm, "cache/promoter_motif_signal.rds")
 breaks    <- seq(-hw, hw, length.out = n_bins + 1)
 centres   <- (breaks[-1] + breaks[-(n_bins + 1)]) / 2
 pm$bin    <- cut(pm$dist, breaks = breaks, labels = FALSE, include.lowest = TRUE)
+# v1.1: restricting to the three definite classes is deliberate -- a profile
+# "by topology" cannot include motifs that have no topology. But under v1.1
+# rule 43 no longer back-fills G4SP's abstentions, so this drops a real and
+# substantial set, and it should be reported rather than left implicit.
+n_pre <- sum(!is.na(pm$bin))
 pm <- pm[!is.na(pm$bin) & pm$topology %in% definite, ]
+message(sprintf(
+  "Motifs profiled: %d / %d in-window (%.1f%% excluded as mixed/unclassified)",
+  nrow(pm), n_pre, 100 * (1 - nrow(pm) / max(n_pre, 1))))
 pm$position <- centres[pm$bin]
 
 sig_long <- bind_rows(lapply(genotypes, function(g) {

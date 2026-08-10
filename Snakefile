@@ -83,6 +83,14 @@ rule all:
         "results/figures/10_metaprofiles/tss_signal_by_topology.pdf",
         "results/figures/11_propensity/propensity_crossvalidation.pdf",
         "results/figures/08_topology/calibration_precision_sweep.pdf",
+        # v1.1 (2026-08-07 audit) — the tables that carry the corrections.
+        # Requested here so they are not silently skippable.
+        "results/tables/topology_concordance_stats.csv",
+        "results/tables/topology_source_composition.csv",
+        "results/tables/topology_control_benchmark_compare.csv",
+        "results/tables/topology_sensitivity_precision.csv",
+        "results/figures/10_metaprofiles/tss_signal_by_topology_argmax.pdf",
+        "results/tables/background_gc_matching.csv",
         "results/figures/12_feature/topology_by_feature.pdf",
         "results/figures/13_rloop/rloop_fraction_by_topology.pdf",
         "results/figures/14_expression/promoter_g4_expression.pdf",
@@ -109,6 +117,7 @@ rule all:
         "results/figures/21_multiG4_expression/promoter_g4_count.pdf",
         # Stage L — strand + Gviz
         "results/tables/strand_bias_summary.tsv",
+        "results/tables/strand_g4_threshold_calibration.tsv",   # v1.1
         "results/figures/22_strand/strand_bias_comprehensive.pdf",
         "results/figures/22_strand/metaprofile_by_strand.pdf",
         "results/figures/23_gviz/.done",
@@ -280,6 +289,11 @@ rule extract_sequences:
     output:
         peak_fa = "cache/peak_seqs_201bp.fa", bg_fa = "cache/background_seqs.fa",
         pqs = "results/tables/peak_pqs.csv",
+        # v1.1: the unmatched-background arm and the realised-vs-target GC
+        # diagnostic, so a weak DeepG4 AUROC can be attributed to aggressive GC
+        # matching or to a noisy peak set rather than left ambiguous.
+        bg_unm = "cache/background_seqs_unmatched.fa",
+        gc = "results/tables/background_gc_matching.csv",
     log: "logs/18_extract_sequences.log"
     shell: "Rscript scripts/18_extract_sequences.R {CONFIG} > {log} 2>&1"
 
@@ -303,8 +317,33 @@ rule assign_topology:
         topo = "results/tables/peak_topology.csv",
         conc = "results/tables/topology_concordance.csv",
         fig = "results/figures/08_topology/topology_counts.pdf",
+        # v1.1: kappa and the marginal-free cross-classification rates reached
+        # no committed artefact in v1.0 -- only a message() into a git-ignored
+        # logs/ dir and a figure subtitle under a git-ignored results/figures/.
+        conc_stats = "results/tables/topology_concordance_stats.csv",
+        # v1.1: topology_source existed in v1.0 and was even written to
+        # peak_topology.csv, but was never aggregated anywhere, so a reader had
+        # no way to see how much of each stratum was a model call.
+        src = "results/tables/topology_source_composition.csv",
+        fig_src = "results/figures/08_topology/topology_source_composition.pdf",
     log: "logs/21_assign_topology.log"
     shell: "Rscript scripts/21_assign_topology.R {CONFIG} > {log} 2>&1"
+
+
+# v1.1: the confidence-stratified sensitivity arm. Rule 21 keeps G4SP's
+# abstentions as "mixed" at g4sp.precision; this recomputes the same labels at
+# plain argmax (no abstention) from the per-class probabilities already in
+# g4sp_topology.csv. No G4SP re-inference, no conda call.
+rule topology_sensitivity:
+    input: g4sp = "results/tables/g4sp_topology.csv",
+           topo = "results/tables/peak_topology.csv"
+    output:
+        topo_argmax = "results/tables/peak_topology_argmax.csv",
+        comp = "results/tables/topology_sensitivity_precision.csv",
+        xt = "results/tables/topology_sensitivity_crosstab.csv",
+        fig = "results/figures/08_topology/topology_sensitivity_precision.pdf",
+    log: "logs/21b_topology_sensitivity.log"
+    shell: "Rscript scripts/21b_topology_sensitivity.R {CONFIG} > {log} 2>&1"
 
 rule sanity_check:
     input:
@@ -340,6 +379,24 @@ rule tss_metaprofiles:
     log: "logs/24_tss_metaprofiles.log"
     shell: "Rscript scripts/24_tss_metaprofiles.R {CONFIG} > {log} 2>&1"
 
+
+# v1.1: the same figure under the argmax topology arm. This is THE result the
+# audit says must be re-derived -- v1.0's "hybrid > parallel > antiparallel"
+# ordering rested on 14,429 hybrids of which 87% were loop-heuristic back-fills,
+# and the primary v1.1 arm leaves 1,879. Rendering both arms means the ordering
+# is reported against the precision threshold rather than at one setting of it.
+rule tss_metaprofiles_argmax:
+    input: promoters = "cache/promoters.rds", peaks = "cache/peaks.rds",
+           topo = "results/tables/peak_topology_argmax.csv", bw = G4_BW
+    output:
+        profiles = "results/tables/tss_topology_profiles_argmax.csv",
+        profiles_norm = "results/tables/tss_topology_profiles_norm_argmax.csv",
+        fig = "results/figures/10_metaprofiles/tss_signal_by_topology_argmax.pdf",
+        fig_norm = "results/figures/10_metaprofiles/tss_signal_by_topology_norm_argmax.pdf",
+    log: "logs/24_tss_metaprofiles_argmax.log"
+    shell:
+        "Rscript scripts/24_tss_metaprofiles.R {CONFIG} {input.topo} _argmax > {log} 2>&1"
+
 rule propensity_metrics:
     input: scores = "results/tables/deepg4_scores.csv", pqs = "results/tables/peak_pqs.csv",
            topo = "results/tables/peak_topology.csv", diff = "results/tables/topology_differential.csv",
@@ -367,6 +424,21 @@ rule control_benchmark:
     shell:
         "conda run -n {G4SP_ENV} python scripts/26b_control_benchmark.py "
         "--config {CONFIG} --out {output.bench} > {log} 2>&1"
+
+
+# v1.1: score the pqsfinder LOOP-LENGTH HEURISTIC on exactly the same 10
+# literature control quadruplexes that the rule above scores G4SP on. This is
+# what turns "the heuristic is not a validated stand-in" from an assertion into
+# a measurement, and it is the evidence for removing the back-fill in rules 21
+# and 43. Measured: G4SP 8/10, heuristic 2/10 -- below the 33% expected from
+# guessing at a three-class problem.
+rule heuristic_control_benchmark:
+    input: controls = config["calibration"]["controls_tsv"],
+           g4sp = "results/tables/g4sp_control_benchmark.csv"
+    output: cmp = "results/tables/topology_control_benchmark_compare.csv"
+    log: "logs/26d_heuristic_control_benchmark.log"
+    shell:
+        "Rscript scripts/26d_heuristic_control_benchmark.R {CONFIG} > {log} 2>&1"
 
 rule calibration_plots:
     input: sweep = "results/tables/topology_precision_sweep.csv",
@@ -647,6 +719,12 @@ rule strand_asymmetry:
         t2 = "results/tables/strand_bias_relative.tsv",
         t3 = "results/tables/g4_detection_by_strand.tsv",
         t4 = "results/tables/g4_score_stats.tsv",
+        # v1.1: the Wilcoxon and chi-square tests the v1.0 script header
+        # advertised but never implemented, plus the per-window-size G4Hunter
+        # threshold calibration that replaces the tautological g4_threshold: 0.0.
+        t5 = "results/tables/strand_score_tests.tsv",
+        t6 = "results/tables/strand_detection_tests.tsv",
+        t7 = "results/tables/strand_g4_threshold_calibration.tsv",
         f1 = "results/figures/22_strand/strand_bias_comprehensive.pdf",
         f2 = "results/figures/22_strand/metaprofile_by_strand.pdf",
         f3 = "results/figures/22_strand/mean_signal_by_strand.pdf",

@@ -10,12 +10,12 @@
 This workflow takes public G-quadruplex (BG4) and R-loop (S9.6) CUT&Tag coverage tracks together
 with an RNA-seq count table from wild-type, **DHX36** knockout, **FANCJ** knockout and
 double-knockout mouse embryonic stem cells, and runs the complete analysis end to end: differential
-expression, replicate-aware peak calling, region-resolved enrichment, RNA × chromatin integration,
+expression, replicate-aware z-score peak calling, region-resolved enrichment, RNA × chromatin integration,
 sequence-level G-quadruplex **topology** assignment, and promoter-focused metaprofiles down to
 individual G4 motifs.
 
 Everything derives from public data (GEO **GSE269081**, **GSE269082**, **GSE269084**). One command
-fetches the inputs, one command reproduces every figure and table. Fifty numbered scripts, 51
+fetches the inputs, one command reproduces every figure and table. Fifty-two numbered scripts, 54
 Snakemake rules, one configuration file, no hidden state.
 
 ---
@@ -40,7 +40,7 @@ scripts/download_data.sh                       # or .\scripts\download_data.ps1 
 
 # 3. run
 conda activate G4
-snakemake -n                                   # dry run: should report ~50 jobs, no missing inputs
+snakemake -n                                   # dry run: should report 54 jobs, no missing inputs
 snakemake --cores 4                            # full run
 ```
 
@@ -62,8 +62,10 @@ Caveats worth stating plainly: you get the **same figures and tables**, and the 
 reproducible because every subsampling step has a fixed seed — but agreement to the last decimal
 depends on matching package versions (R 4.5.1 / Bioconductor 3.21 here). DeepG4 is the one fragile
 dependency and its failure costs a single figure. Peaks are recalled from the bigWigs rather than
-read from a deposited peak file, so peak counts are a genuine reproduction of the calling step, not
-a copy of it.
+read from a deposited peak file, so peaks are recomputed here rather than copied from a deposited
+peak file. Note this is a *different* caller from the source paper, which used MACS3 (q < 0.05) with
+consensus across all three replicates; the z-score caller here is more permissive and the counts are
+not comparable to theirs.
 
 ## Contents
 
@@ -75,6 +77,7 @@ a copy of it.
 - [Running the workflow](#running-the-workflow)
 - [Configuration](#configuration)
 - [Outputs](#outputs)
+- [Limitations](#limitations)
 - [Selected results](#selected-results)
 - [Reproducibility notes](#reproducibility-notes)
 - [Citation](#citation)
@@ -126,7 +129,7 @@ flowchart TD
     BW --> B["<b>Stage B</b> — peaks and regions<br/>z-score peak calling · promoter/5'UTR/intron1/<br/>gene-body/enhancer sets<br/><i>scripts 07-10</i>"]
     BW --> C["<b>Stage C</b> — genome-wide CUT&Tag QC<br/>1 kb tiles · replicate correlation · G4 vs R-loop<br/><i>script 11</i>"]
 
-    B --> D["<b>Stage D</b> — regional enrichment<br/>permutation fold-enrichment · signal · metaprofiles<br/><i>scripts 12-14</i>"]
+    B --> D["<b>Stage D</b> — regional enrichment<br/>width-aware binomial fold-enrichment · signal · metaprofiles<br/><i>scripts 12-14</i>"]
     A --> E["<b>Stage E</b> — RNA x chromatin integration<br/>promoter and TSS signal of DEGs<br/><i>scripts 15-16</i>"]
     B --> E
 
@@ -151,11 +154,11 @@ flowchart TD
 | Stage | Scripts | What happens | Figure themes |
 |---|---|---|---|
 | **A** RNA-seq | `01`–`06` | Library QC and PCA; DESeq2 across five contrasts with ashr shrinkage (padj < 0.05, \|log2FC\| > 0.5); GO:BP and GSEA (Hallmark + targeted DNA-repair/G4/R-loop pathways); gene-biotype resolved volcanoes | `01_qc` `02_deseq2` `03_enrichment` `16_volcano` |
-| **B** Peaks + regions | `07`–`10` | 500 bp genome bins → replicate-mean signal → global z-score (z ≥ 2) → peaks present in ≥ 2 replicates, merged across 500 bp gaps; per-genotype and union peak sets; promoter (TSS ± 2 kb), 5′ UTR, first intron, gene body and ENCODE distal-ELS enhancer region sets | `04_peaks` |
+| **B** Peaks + regions | `07`–`10` | 500 bp genome bins → per-replicate global z-score → bins passing z ≥ 2 in ≥ 2 replicates, merged across 500 bp gaps (`peak_calling.z_per_replicate`; set `false` for the v1.0 rule, which z-scored the replicate mean once and separately required non-zero coverage in ≥ 2 replicates); per-genotype and union peak sets; promoter (TSS ± 2 kb), 5′ UTR, first intron, gene body and ENCODE distal-ELS enhancer region sets | `04_peaks` |
 | **C** Genome-wide QC | `11` | 1 kb tiles genome-wide (500 k subsampled), signal distributions, replicate correlation, G4-vs-R-loop scatter per genotype | `05_cuttag` |
-| **D** Regional enrichment | `12`–`14` | Permutation-based fold enrichment of peaks in each region class, regional signal distributions, ±2 kb metaprofiles (80 bins), plus a full-peak validation metaprofile | `06_regional` |
+| **D** Regional enrichment | `12`–`14` | Width-aware binomial fold enrichment of peaks in each region class, regional signal distributions, ±2 kb metaprofiles (80 bins), plus a full-peak validation metaprofile | `06_regional` |
 | **E** Integration | `15`–`16` | Promoter (± 2 kb) CUT&Tag signal split by DEG direction; TSS ± 5 kb profiles (100 bins) for the top 500 up- and down-regulated genes per KO-vs-WT contrast | `07_integration` |
-| **F** Topology core | `17`–`29` | 201 bp peak-summit sequences + GC-matched background; DeepG4 formation probability; pqsfinder PQS detection (score ≥ 20); G4ShapePredictor topology (parallel / antiparallel / hybrid) at 0.80 precision; loop-length heuristic cross-check; literature-control calibration sweep; differential gain/loss (voom); propensity metrics; genomic-feature partition; R-loop coupling; promoter-G4 vs expression | `08_topology` `09_gain_loss` `10_metaprofiles` `11_propensity` `12_feature` `13_rloop` `14_expression` |
+| **F** Topology core | `17`–`29` | 201 bp PQS-centred sequences (peak midpoint as fallback) + GC-matched and unmatched background; DeepG4 formation probability; pqsfinder PQS detection (score ≥ 20); G4ShapePredictor topology (parallel / antiparallel / hybrid / mixed) at 0.80 precision with an argmax sensitivity arm; loop-length heuristic reported alongside for comparison, never used to assign labels; literature-control calibration sweep; differential gain/loss (voom); propensity metrics; genomic-feature partition; R-loop coupling; promoter-G4 vs expression | `08_topology` `09_gain_loss` `10_metaprofiles` `11_propensity` `12_feature` `13_rloop` `14_expression` |
 | **G** Topology metaprofiles | `30`–`34` | Topology-resolved BG4 profiles at promoters, 5′ UTRs, first introns and enhancers; DEG × topology grids; totals across features | `10_metaprofiles` |
 | **H** Unclassified peaks | `35`–`37` | Peaks with no canonical PQS: signal profiles, sequence and repeat context (RepeatMasker), JASPAR motif enrichment | `15_unclassified` |
 | **I** lncRNA | `38` | G4 occupancy at lncRNA TSSs (GENCODE vM25 biotypes), split by DEG status and gain/loss | `17_lncrna` |
@@ -171,7 +174,7 @@ One rule per numbered script, all wired into a single `rule all` — see [`Snake
 
 ```
 G4_Promoter_Pipeline/
-├── Snakefile                     # 51 rules + rule all; one rule per numbered script
+├── Snakefile                     # 54 rules + rule all; one rule per numbered script
 ├── config/
 │   ├── config.yaml               # every path, threshold and parameter
 │   └── config.local.example.yaml # template for pointing at data you already have
@@ -181,6 +184,7 @@ G4_Promoter_Pipeline/
 │   ├── 01_*.R … 49_*.R           # analysis steps in DAG order
 │   ├── 20_g4sp_topology.py       # G4ShapePredictor topology (g4sp conda env)
 │   ├── 26a_*.py, 26b_*.py        # threshold sweep + literature-control benchmark
+│   ├── 26d_*.R                   # the same benchmark for the loop-length heuristic
 │   ├── download_data.ps1         # fetch inputs from GEO (Windows)
 │   └── download_data.sh          # fetch inputs from GEO (Linux/macOS/WSL)
 ├── envs/
@@ -191,10 +195,15 @@ G4_Promoter_Pipeline/
 │   └── deepg4.yaml               # all-in-one DeepG4 env (Linux/WSL only)
 ├── data/
 │   ├── geo_manifest.tsv          # the 28 CUT&Tag samples: accession, size, metadata
-│   ├── known_topology_controls.tsv   # 11 literature-validated control G4s
+│   ├── known_topology_controls.tsv   # 10 literature-validated control G4s
 │   ├── bigwig/                   # ← downloaded (git-ignored, ~3.4 GB)
 │   └── rnaseq/                   # ← downloaded (git-ignored)
-├── docs/figures/                 # showcase PNGs used in this README
+├── docs/
+│   ├── figures/                  # showcase PNGs used in this README
+│   └── audit-2026-08/            # the external audit, the point-by-point response
+│                                 #   and the exact README/config deltas it produced
+├── verify/                       # standalone checks that the audit corrections are
+│                                 #   warranted; needs no bigWigs or cache (~1 min)
 ├── results/
 │   ├── figures/NN_theme/         # generated: PDF + PNG at 300 dpi (git-ignored)
 │   └── tables/                   # generated; the small summary tables are committed
@@ -424,6 +433,58 @@ Key tables: `peak_summary.csv` (peak counts and widths per set), `region_fold_en
 
 ---
 
+## Limitations
+
+> **Pre-run note.** The corrections described here were applied in response to the
+> [2026-08-07 audit](docs/audit-2026-08/) and are documented in
+> [`docs/audit-2026-08/REVIEW.md`](docs/audit-2026-08/REVIEW.md). Figures marked *expected* are
+> derived from the committed v1.0 tables and the verification suite in [`verify/`](verify/); they
+> are confirmed by the next full run. Everything else below is measured.
+
+**Topology assignment is unresolved, and this version says so.** At the configured precision
+G4ShapePredictor declines to classify 22.3 % of PQS-bearing peaks. v1.0 back-filled those with a
+pqsfinder loop-length heuristic, which supplied 87 % of the reported hybrid stratum and 66 % of the
+antiparallel stratum. Scored on the same 10 literature control quadruplexes, G4SP gets **8/10** and
+the loop heuristic **2/10** — below the 33 % expected from guessing at a three-class problem
+(`topology_control_benchmark_compare.csv`). The abstentions are therefore kept as their own `mixed`
+stratum and no substitutions are made. Call provenance is reported in
+`topology_source_composition.csv`, and `topology_sensitivity_precision.csv` reports the same
+analysis under plain argmax, where there is no abstention at all.
+
+**The two methods agree at chance level.** Cohen's κ = −0.0098 over the 101,638 peaks where both
+give a definite call. κ is depressed here by very different marginals (G4SP 94.1 % parallel,
+heuristic 34.4 %), so the marginal-free statement is the fairer one: of the heuristic's 41,122
+hybrid calls only 741 (1.8 %) are also G4SP-hybrid; of its 25,539 antiparallel calls only 191
+(0.7 %) agree.
+
+**DeepG4 AUROC is 0.563** against GC-matched background, with Spearman ρ = 0.13 against peak
+strength. DeepG4 is a classifier of formation propensity rather than an occupancy predictor, so the
+weak ρ is expected — but an AUROC this close to 0.5 on the positive control is not. Either the GC
+matching removes the signal (GC drives both DeepG4 score and BG4 occupancy), or a substantial
+fraction of called peaks are not G4 sites. An unmatched background arm and a realised-vs-target GC
+diagnostic (`background_gc_matching.csv`) are emitted to separate those two readings. The DeepG4
+panels are diagnostic, not validation.
+
+**The peak caller has no null.** A relative global z ≥ 2 on each sample's own signal cannot fail to
+return peaks: the ERCC control tracks yield *more* peaks than the real samples (114,980 vs 107,276
+for WT under the v1.0 rule). Peak counts are not comparable across genotypes either, since μ and σ
+are recomputed per genotype — a global occupancy change is normalised away before thresholding.
+Read the limma-voom differential signal on the union peak set (`23_gain_loss.R`) for the KO effect,
+not `peak_summary.csv`. The pipeline has no IgG or input track; ERCC is the available substitute.
+
+**The magnitude claim depends on someone else's spike-in scaling.** The WT < FANCJKO < DHX36KO ≈ dKO
+ordering is read off *Drosophila*-spike-in-scaled bigWigs from Sato et al. This pipeline contains no
+independent check on that scaling and no internal reference. The ERCC batch clustering at r ≈
+0.70–0.80 while within-batch replicates reach r ≈ 0.94–0.98 shows batch effects of the relevant
+magnitude exist in this assay.
+
+**`peak_counts_per_region.tsv` and `region_fold_enrichment.tsv` count differently** under the same
+region labels. The first is priority-exclusive (a peak is assigned to promoter > enhancer > 5′ UTR >
+first intron > gene body and counted once): WT 5′ UTR = 878. The second uses non-exclusive overlap:
+the same cell is 3,410. Neither is wrong; they answer different questions.
+
+---
+
 ## Selected results
 
 Nine figures from the v1.0.0 run, in [`docs/figures/`](docs/figures/). Each is produced by the
@@ -460,13 +521,26 @@ dose-dependent: **WT < FANCJKO < DHX36KO ≈ dKO** — losing the helicases rais
 occupancy at promoters rather than redistributing it. R-loop (S9.6) profiles show the same TSS
 architecture with a much weaker genotype effect.
 
-Permutation testing confirms this quantitatively (`12_peak_region_enrichment.R`, table
-`region_fold_enrichment.tsv`): BG4 peaks are significantly enriched over random placement at
-promoters, distal enhancers and 5′ UTRs in every genotype (permutation p < 0.001), while the ERCC1
-control tracks are far weaker at promoters — the enrichment is antibody-specific, not an artefact of
-the peak caller. Note that fold-enrichment values scale inversely with region size, so the ±2 kb
-promoter windows (~3 % of the genome) score lower than the much smaller 5′ UTRs despite carrying the
-strongest metaprofile peak; the profiles above are the fairer read-out of promoter occupancy.
+Fold enrichment is quantified against a width-aware binomial null
+(`12_peak_region_enrichment.R`, table `region_fold_enrichment.tsv`). The expectation for each peak
+is the `reduce()`d region footprint dilated by the peak's own width — a 966 bp peak overlaps a
+region set whenever its start falls within `region_width + peak_width − 1`, not merely within the
+region. This is an analytic test, **not a permutation**: `regioneR::permTest` with
+`circularRandomizeRegions` would be the gold standard but hangs on Windows, which is why the
+binomial was substituted. BG4 peaks are enriched at promoters, distal enhancers and 5′ UTRs in
+every genotype.
+
+Two caveats. First, with n ≈ 100,000 peaks any deviation returns p ≈ 0 (36 of 60 rows underflow to
+exactly zero), so the p-values are not doing work — read the fold values, not the stars. Second,
+peaks are not independent Bernoulli draws; they cluster with mappability, GC and accessibility,
+which the binomial cannot express.
+
+The ERCC batch scores lower at promoters (BG4 fold 1.27–1.45 vs 1.92–2.12), but these tracks use
+the **same BG4 antibody** and differ from the main panel by batch, so this is a batch comparison
+rather than an antibody-specificity control. The pipeline has no IgG or input track and cannot
+establish antibody specificity. Note also that the ERCC **R-loop** tracks score *higher* at
+promoters (1.31–1.37) than the real S9.6 WT track (0.99), which is the opposite of what a
+specificity argument would predict.
 
 ### Promoter G4 signal gains in the knockouts, and tracks with expression change
 
@@ -514,6 +588,24 @@ across genotypes (Pearson r = 0.51–0.57, Spearman ρ = 0.40–0.43), but the l
 non-linear: R-loop signal is flat across low-G4 promoters and rises steeply above roughly 2.5 z.
 Coupling is therefore a property of the strongly G4-occupied promoters rather than a genome-wide
 proportionality, and helicase loss does not change that relationship.
+
+### Promoter G4 content does not predict which genes respond to helicase loss
+
+Neither the number of G4s at a promoter nor their assigned topology predicts which genes change
+expression in the knockouts (`29_promoter_g4_expression.R`, `47_multiG4_promoter_expression.R`).
+The headline test — parallel-G4 promoters vs no-G4 promoters — is non-significant in all three KOs
+(Wilcoxon p = 0.169 / 0.179 / 0.779), with median |LFC| differences of ~0.001. G4 count per
+promoter correlates with baseline expression at ρ = 0.022 (p = 0.008, significant only because
+n ≈ 20,000) and with |LFC| not at all (Kruskal p = 0.26–0.58). The one nominally significant result
+(FANCJKO Kruskal p = 0.044) sits on a median difference of 0.001 and would not survive correction
+across the three tests.
+
+This is a real result, not a failed one. Steady-state G4 occupancy at a promoter, measured in bulk
+chromatin, is **not sufficient** to predict transcriptional consequence. Occupancy conflates
+formation with persistence; position relative to the TSS is collapsed into presence/absence; and
+strand is not resolved. Separating those requires a system where topology, position and strand are
+defined on the template rather than inferred from sequence — which is precisely what the κ ≈ 0 and
+2/10 control results in [Limitations](#limitations) say cannot currently be done computationally.
 
 ---
 

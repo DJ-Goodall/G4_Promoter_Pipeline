@@ -40,15 +40,53 @@ clone_to_genotype <- c(
 
 assay_label_map <- c("G4_BG4" = "BG4 (G4)", "Rloop_S96" = "S9.6 (R-loop)")
 
-# Topology classes used throughout (G4SP classes + the no-PQS bucket)
-topology_levels  <- c("parallel", "antiparallel", "hybrid", "no_canonical_PQS")
-topology_labels  <- c("Parallel (4+0)", "Antiparallel (2+2)", "Hybrid (3+1)", "No canonical PQS")
+# Topology classes used throughout (G4SP classes + the no-PQS bucket).
+#
+# v1.1: "mixed" added. It is G4ShapePredictor's own abstention class -- no
+# class probability cleared its precision-calibrated threshold. v1.0 never
+# reached the figures with this label because rule 21 back-filled every mixed
+# call with the pqsfinder loop-length heuristic; at precision 0.80 that was
+# 29,225 of 130,863 PQS-bearing union peaks, and it supplied 87% of the hybrid
+# and 66% of the antiparallel stratum. Adding it here means every downstream
+# figure that factors on topology_levels picks it up automatically.
+topology_levels  <- c("parallel", "antiparallel", "hybrid", "mixed",
+                      "no_canonical_PQS")
+topology_labels  <- c("Parallel (4+0)", "Antiparallel (2+2)", "Hybrid (3+1)",
+                      "Mixed / unresolved", "No canonical PQS")
 topology_palette <- c(
   "parallel"         = "#1B9E77",
   "antiparallel"     = "#D95F02",
   "hybrid"           = "#7570B3",
+  "mixed"            = "#E7B416",
   "no_canonical_PQS" = "grey70"
 )
+# The three classes G4SP will commit to. Kept here so scripts stop redefining
+# it locally (rule 21 and rule 43 each had their own copy).
+topology_definite <- c("parallel", "antiparallel", "hybrid")
+
+# v1.1: which topology facets a metaprofile should display, given the labels it
+# actually holds.
+#
+# Rules 24, 30 and 33 each hard-coded `keep_groups <- c(definite, "none")` and
+# then subset to it. That was harmless while rule 21 back-filled every "mixed"
+# call, but under v1.1 it would DELETE every region whose strongest overlapping
+# peak is mixed -- and delete it silently, since those regions do not fall
+# through to "none", they leave the denominator entirely. Include the facet when
+# it is populated, so the figure says "unresolved" rather than "absent".
+topology_keep_groups <- function(group_vec, incl_none = TRUE) {
+  c(topology_definite,
+    if (any(group_vec %in% "mixed", na.rm = TRUE)) "mixed",
+    if (isTRUE(incl_none)) "none")
+}
+
+# Facet labels for the above. "none" is not a topology class (it means "no G4
+# peak overlaps this region"), so it is not in topology_levels and is labelled
+# explicitly.
+topology_group_labels <- function(keep_groups) {
+  lab <- setNames(topology_labels[match(keep_groups, topology_levels)], keep_groups)
+  if ("none" %in% keep_groups) lab[["none"]] <- "No G4 peak"
+  lab
+}
 
 # ---------------------------------------------------------------------------
 # Config + path helpers
@@ -133,13 +171,19 @@ default_chrom_sizes <- function(std = paste0("chr", c(1:19, "X"))) {
 
 read_bigwig_rle <- function(bw_filepath, chroms = NULL, chrom_sizes = NULL) {
   abs_path <- normalizePath(bw_filepath, winslash = "/", mustWork = TRUE)
-  if (exists(abs_path, envir = .bw_rle_cache)) {
-    return(get(abs_path, envir = .bw_rle_cache))
-  }
   if (is.null(chrom_sizes)) chrom_sizes <- default_chrom_sizes()
   lvl <- names(chrom_sizes)
   if (!is.null(chroms)) lvl <- intersect(lvl, chroms)
   if (length(lvl) == 0) return(S4Vectors::List())
+  # v1.1: key the cache on path AND the requested seqlevels. v1.0 keyed on
+  # abs_path alone, so the FIRST call decided the chromosome set for every
+  # later call on the same file -- a call restricted to a subset silently
+  # poisoned subsequent whole-genome calls. Latent in v1.0 (all callers happen
+  # to pass the same std_chroms) but a trap for anyone adding a rule.
+  cache_key <- paste0(abs_path, "|", paste(lvl, collapse = ","))
+  if (exists(cache_key, envir = .bw_rle_cache)) {
+    return(get(cache_key, envir = .bw_rle_cache))
+  }
 
   si <- GenomeInfoDb::Seqinfo(seqnames = lvl,
                               seqlengths = as.integer(chrom_sizes[lvl]))
@@ -157,14 +201,19 @@ read_bigwig_rle <- function(bw_filepath, chroms = NULL, chrom_sizes = NULL) {
   message(sprintf("  Loading BigWig: %s", basename(abs_path)))
   bwf <- rtracklayer::BigWigFile(path_for_import)
   rle <- rtracklayer::import(bwf, which = which_gr, as = "RleList")
-  assign(abs_path, rle, envir = .bw_rle_cache)
+  assign(cache_key, rle, envir = .bw_rle_cache)
   rle
 }
 
 evict_bigwigs <- function(bw_filepaths) {
+  # v1.1: cache keys are now "<abs_path>|<seqlevels>", so evict every entry
+  # whose key starts with this path. Matching on the bare path (as v1.0 did)
+  # would silently free nothing and the eviction calls after each genotype
+  # loop are load-bearing for memory, not hygiene.
+  keys <- ls(envir = .bw_rle_cache, all.names = TRUE)
   for (fp in normalizePath(bw_filepaths, winslash = "/", mustWork = FALSE)) {
-    if (exists(fp, envir = .bw_rle_cache, inherits = FALSE))
-      rm(list = fp, envir = .bw_rle_cache)
+    hit <- keys[keys == fp | startsWith(keys, paste0(fp, "|"))]
+    if (length(hit)) rm(list = hit, envir = .bw_rle_cache)
   }
   gc(verbose = FALSE)
 }
@@ -519,10 +568,38 @@ g4hunter_score <- function(seqs) {
 #   bin genome -> replicate-mean signal per bin -> global z on log1p(mean) ->
 #   seed bins (z >= z_thresh AND signal>0 in >= min_replicates) -> merge within
 #   gap_bp -> keep peaks >= min_width. Attaches n_bins / mean_signal / max_z.
+#
+# ---------------------------------------------------------------------------
+# v1.1 (2026-08-07 audit): `z_per_replicate`.
+#
+# In v1.0 the replicate criterion was `rowSums(sig_mat > 0) >= min_replicates`
+# -- signal strictly greater than ZERO in >= 2 replicates. At CUT&Tag depth
+# almost every mappable 500 bp bin satisfies that, so it is close to a no-op,
+# and the z-test itself was applied once to the replicate MEAN, letting a
+# single strong replicate carry a bin. The README described this as
+# "replicate-aware peak calling" and "peaks present in >= 2 replicates";
+# neither was accurate.
+#
+# The evidence that this matters is already in the v1.0 output: the ERCC
+# control tracks produce MORE peaks than the real samples (G4_BG4_ERCCKO
+# 114,980 vs G4_BG4_WT 107,276; ercc_union 150,977 vs union 147,843). Because
+# the threshold is a relative global z on each sample's own signal, there is no
+# null in which a peak can fail to be called -- the caller returns ~110k peaks
+# whatever it is given.
+#
+# z_per_replicate = TRUE z-scores each replicate column independently and
+# requires z >= z_thresh in >= min_replicates of them. The v1.0 path is kept
+# (z_per_replicate = FALSE, the default) so v1.0 output stays exactly
+# reproducible; set it in config as peak_calling.z_per_replicate.
+#
+# This does NOT add an input/IgG null, which is the deeper fix -- there is no
+# IgG track in the GEO submission. Use the ERCC tracks as the empirical control
+# arm instead and report the overlap (see docs/audit-2026-08/REVIEW.md section 2.2).
 # ---------------------------------------------------------------------------
 call_peaks_from_bigwigs <- function(bw_filepaths, chrom_sizes, bin_size = 500L,
                                     z_thresh = 2, min_replicates = 2,
-                                    gap_bp = 500, min_width = 500) {
+                                    gap_bp = 500, min_width = 500,
+                                    z_per_replicate = FALSE) {
   std_chroms <- names(chrom_sizes)
   n_reps     <- length(bw_filepaths)
   if (n_reps == 0) return(GenomicRanges::GRanges())
@@ -550,7 +627,7 @@ call_peaks_from_bigwigs <- function(bw_filepaths, chrom_sizes, bin_size = 500L,
       sig
     }, numeric(length(starts)))
     if (!is.matrix(sig_mat)) sig_mat <- matrix(sig_mat, ncol = n_reps)
-    list(chr = chr, starts = starts, ends = ends,
+    list(chr = chr, starts = starts, ends = ends, sig_mat = sig_mat,
          mean_sig = rowMeans(sig_mat), support = rowSums(sig_mat > 0))
   })
 
@@ -561,7 +638,27 @@ call_peaks_from_bigwigs <- function(bw_filepaths, chrom_sizes, bin_size = 500L,
   sdv <- sd(log_sig, na.rm = TRUE)
   z   <- if (sdv > 0) (log_sig - mu) / sdv else rep(0, length(log_sig))
 
-  seed_mask <- z >= z_thresh & all_support >= min_replicates & all_mean > 0
+  if (isTRUE(z_per_replicate)) {
+    # v1.1: z-score each replicate independently, then require the threshold to
+    # be met in >= min_replicates of them. This is what "peaks present in >= 2
+    # replicates" actually means.
+    all_sig <- do.call(rbind, lapply(per_chr, `[[`, "sig_mat"))
+    rep_pass <- vapply(seq_len(ncol(all_sig)), function(j) {
+      lj <- log1p(all_sig[, j])
+      mj <- mean(lj, na.rm = TRUE); sj <- sd(lj, na.rm = TRUE)
+      if (!is.finite(sj) || sj <= 0) return(rep(FALSE, length(lj)))
+      ((lj - mj) / sj) >= z_thresh
+    }, logical(nrow(all_sig)))
+    if (!is.matrix(rep_pass)) rep_pass <- matrix(rep_pass, ncol = ncol(all_sig))
+    n_rep_pass <- rowSums(rep_pass)
+    seed_mask  <- n_rep_pass >= min_replicates & all_mean > 0
+    message(sprintf(
+      "  z_per_replicate: %d bins pass in >= %d/%d replicates (v1.0 rule would give %d)",
+      sum(seed_mask), min_replicates, ncol(all_sig),
+      sum(z >= z_thresh & all_support >= min_replicates & all_mean > 0)))
+  } else {
+    seed_mask <- z >= z_thresh & all_support >= min_replicates & all_mean > 0
+  }
   if (!any(seed_mask)) return(GenomicRanges::GRanges())
 
   chr_n      <- vapply(per_chr, function(x) length(x$starts), integer(1))

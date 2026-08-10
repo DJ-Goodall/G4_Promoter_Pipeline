@@ -59,7 +59,13 @@ if (any(scores$set == "background")) {
              label = sprintf("AUROC = %.3f", auroc)) +
     coord_equal() +
     labs(x = "False positive rate", y = "True positive rate",
-         title = "DeepG4 discriminates G4 peaks from GC-matched background") +
+         # v1.1: the v1.0 title asserted "DeepG4 discriminates G4 peaks from
+         # GC-matched background" while the measured AUROC was 0.563. State the
+         # number, do not editorialise it.
+         title = sprintf("DeepG4 score: called peaks vs GC-matched background (AUROC = %.3f)",
+                         auroc),
+         subtitle = if (auroc < 0.65)
+           "Weak separation. See sanity_metrics.csv and README Limitations." else NULL) +
     theme_pub()
   save_plot(p_roc, "deepg4_roc", "08_topology", fig_root, width = 6, height = 6)
 
@@ -107,3 +113,20 @@ message("Done. AUROC = ", round(auroc, 3),
         round(median(scores$deepg4_prob[scores$set == "peak"], na.rm = TRUE), 3), "/",
         round(median(scores$deepg4_prob[scores$set == "background"], na.rm = TRUE), 3))
 print(metrics)
+
+# --- v1.1: fail loudly when the positive control is weak --------------------
+# In v1.0 this number (0.563) sat in a table while the figure title asserted
+# that DeepG4 "discriminates". Whatever the explanation -- aggressive GC
+# matching removing the signal, or a large fraction of the 147,843 peaks not
+# being G4 sites -- an AUROC this close to 0.5 on your own positive control is
+# a headline, not a footnote. It must reach the reader.
+if (is.finite(auroc) && auroc < 0.65) {
+  warning(sprintf(paste0(
+    "DeepG4 AUROC = %.3f against GC-matched background -- close to the 0.5 null. ",
+    "Do NOT present the DeepG4 panels as validation without stating this. ",
+    "Two non-exclusive readings: (a) GC matching is so aggressive it removes ",
+    "the signal, since GC content drives both DeepG4 score and BG4 occupancy ",
+    "-- run the unmatched-background arm (18_extract_sequences.R) to separate ",
+    "them; (b) a substantial fraction of called peaks are not G4 sites, which ",
+    "the ERCC control peak counts independently suggest."), auroc))
+}
