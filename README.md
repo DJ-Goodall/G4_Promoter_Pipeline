@@ -435,39 +435,44 @@ Key tables: `peak_summary.csv` (peak counts and widths per set), `region_fold_en
 
 ## Limitations
 
-> **Pre-run note.** The corrections described here were applied in response to the
+> **Run note.** The corrections described here were applied in response to the
 > [2026-08-07 audit](docs/audit-2026-08/) and are documented in
-> [`docs/audit-2026-08/REVIEW.md`](docs/audit-2026-08/REVIEW.md). Figures marked *expected* are
-> derived from the committed v1.0 tables and the verification suite in [`verify/`](verify/); they
-> are confirmed by the next full run. Everything else below is measured.
+> [`docs/audit-2026-08/REVIEW.md`](docs/audit-2026-08/REVIEW.md). Every figure below is now
+> **measured** from the end-to-end run of 2026-08-10/11 on branch `2026-08-10_V1.1`; the run
+> itself is audited in [`docs/v1.1-run-report-2026-08-11.md`](docs/v1.1-run-report-2026-08-11.md).
 
 **Topology assignment is unresolved, and this version says so.** At the configured precision
-G4ShapePredictor declines to classify 22.3 % of PQS-bearing peaks. v1.0 back-filled those with a
-pqsfinder loop-length heuristic, which supplied 87 % of the reported hybrid stratum and 66 % of the
-antiparallel stratum. Scored on the same 10 literature control quadruplexes, G4SP gets **8/10** and
+G4ShapePredictor declines to classify 22.4 % of PQS-bearing peaks (13,570 of 60,508). Had v1.0's
+back-fill been applied to this run, the pqsfinder loop-length heuristic would have supplied
+**84.8 %** of the reported hybrid stratum and **72.8 %** of the antiparallel stratum. Scored on the
+same 10 literature control quadruplexes, G4SP gets **8/10** and
 the loop heuristic **2/10** — below the 33 % expected from guessing at a three-class problem
 (`topology_control_benchmark_compare.csv`). The abstentions are therefore kept as their own `mixed`
 stratum and no substitutions are made. Call provenance is reported in
 `topology_source_composition.csv`, and `topology_sensitivity_precision.csv` reports the same
 analysis under plain argmax, where there is no abstention at all.
 
-**The two methods agree at chance level.** Cohen's κ = −0.0098 over the 101,638 peaks where both
-give a definite call. κ is depressed here by very different marginals (G4SP 94.1 % parallel,
-heuristic 34.4 %), so the marginal-free statement is the fairer one: of the heuristic's 41,122
-hybrid calls only 741 (1.8 %) are also G4SP-hybrid; of its 25,539 antiparallel calls only 191
-(0.7 %) agree.
+**The two methods agree at chance level.** Cohen's κ = −0.0092 over the 46,938 peaks where both
+give a definite call. κ is depressed here by very different marginals (G4SP 95.0 % parallel,
+heuristic 35.9 %), so the marginal-free statement is the fairer one: of the heuristic's 18,438
+hybrid calls only 391 (2.1 %) are also G4SP-hybrid; of its 11,650 antiparallel calls only 38
+(0.3 %) agree.
 
-**DeepG4 AUROC is 0.563** against GC-matched background, with Spearman ρ = 0.13 against peak
+**DeepG4 AUROC is 0.591** against GC-matched background, with Spearman ρ = 0.065 against peak
 strength. DeepG4 is a classifier of formation propensity rather than an occupancy predictor, so the
 weak ρ is expected — but an AUROC this close to 0.5 on the positive control is not. Either the GC
 matching removes the signal (GC drives both DeepG4 score and BG4 occupancy), or a substantial
-fraction of called peaks are not G4 sites. An unmatched background arm and a realised-vs-target GC
-diagnostic (`background_gc_matching.csv`) are emitted to separate those two readings. The DeepG4
-panels are diagnostic, not validation.
+fraction of called peaks are not G4 sites. `background_gc_matching.csv` rules out one trivial
+explanation — every GC bin met its target with zero shortfall, so the matching is not silently
+truncating — and an unmatched background arm is emitted alongside it. The DeepG4 panels are
+diagnostic, not validation; `22_sanity_check.R` now warns when AUROC < 0.65.
 
 **The peak caller has no null.** A relative global z ≥ 2 on each sample's own signal cannot fail to
-return peaks: the ERCC control tracks yield *more* peaks than the real samples (114,980 vs 107,276
-for WT under the v1.0 rule). Peak counts are not comparable across genotypes either, since μ and σ
+return peaks. Under the v1.0 rule the ERCC control tracks yielded *more* peaks than the real
+samples (114,980 vs 107,276 for WT); with `z_per_replicate: true` and `min_width: 1000` the
+ordering inverts (ERCC BG4 26,686 vs WT 44,737), which is what the change was for — but a control
+that merely scores lower is still not a null. Peak counts are not comparable across genotypes
+either, since μ and σ
 are recomputed per genotype — a global occupancy change is normalised away before thresholding.
 Read the limma-voom differential signal on the union peak set (`23_gain_loss.R`) for the KO effect,
 not `peak_summary.csv`. The pipeline has no IgG or input track; ERCC is the available substitute.
@@ -480,8 +485,8 @@ magnitude exist in this assay.
 
 **`peak_counts_per_region.tsv` and `region_fold_enrichment.tsv` count differently** under the same
 region labels. The first is priority-exclusive (a peak is assigned to promoter > enhancer > 5′ UTR >
-first intron > gene body and counted once): WT 5′ UTR = 878. The second uses non-exclusive overlap:
-the same cell is 3,410. Neither is wrong; they answer different questions.
+first intron > gene body and counted once): WT 5′ UTR = 535. The second uses non-exclusive overlap:
+the same cell is 2,240. Neither is wrong; they answer different questions.
 
 ---
 
@@ -530,16 +535,19 @@ region. This is an analytic test, **not a permutation**: `regioneR::permTest` wi
 binomial was substituted. BG4 peaks are enriched at promoters, distal enhancers and 5′ UTRs in
 every genotype.
 
-Two caveats. First, with n ≈ 100,000 peaks any deviation returns p ≈ 0 (36 of 60 rows underflow to
+Correcting the null largely removes the inverse-region-size artefact: WT BG4 5′ UTR fold falls from
+18.75 to **2.72**, against a promoter fold of **2.14** — a 1.27× gap where v1.0 reported 7.5×.
+
+Two caveats. First, with n ≈ 60,000 peaks any deviation returns p ≈ 0 (20 of 60 rows underflow to
 exactly zero), so the p-values are not doing work — read the fold values, not the stars. Second,
 peaks are not independent Bernoulli draws; they cluster with mappability, GC and accessibility,
 which the binomial cannot express.
 
-The ERCC batch scores lower at promoters (BG4 fold 1.27–1.45 vs 1.92–2.12), but these tracks use
+The ERCC batch scores lower at promoters (BG4 fold 1.58–1.73 vs 2.11–2.18), but these tracks use
 the **same BG4 antibody** and differ from the main panel by batch, so this is a batch comparison
 rather than an antibody-specificity control. The pipeline has no IgG or input track and cannot
 establish antibody specificity. Note also that the ERCC **R-loop** tracks score *higher* at
-promoters (1.31–1.37) than the real S9.6 WT track (0.99), which is the opposite of what a
+promoters (1.51–1.63) than the real S9.6 tracks (1.14–1.21), which is the opposite of what a
 specificity argument would predict.
 
 ### Promoter G4 signal gains in the knockouts, and tracks with expression change

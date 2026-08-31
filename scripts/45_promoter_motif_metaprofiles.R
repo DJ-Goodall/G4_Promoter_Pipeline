@@ -39,7 +39,7 @@ mcfg      <- cfg$motif_analysis
 hw        <- mcfg$promoter_half_width %||% 2000
 sig_hw    <- mcfg$signal_half_width %||% 100
 n_bins    <- mcfg$n_bins %||% cfg$metaprofile$n_bins %||% 80
-definite  <- c("parallel", "antiparallel", "hybrid")
+definite  <- topology_definite             # v1.1: shared, was a local copy
 
 # --- Promoters -> strand-aware TSS points + windows -------------------------
 prom <- readRDS(file.path(cfg$paths$cache_v2, cfg$feature$region_files$promoter))
@@ -99,15 +99,19 @@ saveRDS(pm, "cache/promoter_motif_signal.rds")
 breaks    <- seq(-hw, hw, length.out = n_bins + 1)
 centres   <- (breaks[-1] + breaks[-(n_bins + 1)]) / 2
 pm$bin    <- cut(pm$dist, breaks = breaks, labels = FALSE, include.lowest = TRUE)
-# v1.1: restricting to the three definite classes is deliberate -- a profile
-# "by topology" cannot include motifs that have no topology. But under v1.1
-# rule 43 no longer back-fills G4SP's abstentions, so this drops a real and
-# substantial set, and it should be reported rather than left implicit.
+# v1.1 (2026-08-11): restricting to the three DEFINITE classes dropped 23.5% of
+# in-window motifs on the floor once rule 43 stopped back-filling G4SP's
+# abstentions. "mixed" is G4SP's own abstention label, not an absence of data, so
+# it is now carried as its own curve -- the same treatment rules 24/30/33 already
+# give it. incl_none = FALSE because motifs have no "no G4 peak" class: every
+# motif IS a PQS. See topology_keep_groups() in helpers.R.
+keep_groups <- topology_keep_groups(pm$topology, incl_none = FALSE)
 n_pre <- sum(!is.na(pm$bin))
-pm <- pm[!is.na(pm$bin) & pm$topology %in% definite, ]
+pm <- pm[!is.na(pm$bin) & pm$topology %in% keep_groups, ]
 message(sprintf(
-  "Motifs profiled: %d / %d in-window (%.1f%% excluded as mixed/unclassified)",
+  "Motifs profiled: %d / %d in-window (%.1f%% excluded as unclassified)",
   nrow(pm), n_pre, 100 * (1 - nrow(pm) / max(n_pre, 1))))
+message("Motifs per topology:"); print(table(pm$topology))
 pm$position <- centres[pm$bin]
 
 sig_long <- bind_rows(lapply(genotypes, function(g) {
@@ -121,10 +125,15 @@ profiles <- sig_long %>%
             sem  = sd(signal, na.rm = TRUE) / sqrt(sum(!is.na(signal))),
             .groups = "drop")
 profiles$genotype <- factor(profiles$genotype, levels = genotypes)
-profiles$topology <- factor(profiles$topology, levels = definite)
+profiles$topology <- factor(profiles$topology, levels = keep_groups)
 readr::write_csv(profiles, "results/tables/promoter_motif_profiles.csv")
 
-topo_labs <- setNames(topology_labels[match(definite, topology_levels)], definite)
+# Legend labels carry the n behind each curve: hybrid rests on far fewer motifs
+# than parallel, and at 80 bins that difference decides how much to trust a wiggle.
+topo_n      <- table(factor(pm$topology, levels = keep_groups))
+topo_labs   <- topology_group_labels(keep_groups)
+topo_labs_n <- setNames(sprintf("%s (n = %d)", topo_labs, as.integer(topo_n[keep_groups])),
+                        keep_groups)
 
 # --- (1) SIGNAL: mean per-motif signal vs distance to TSS, by topology -------
 p_sig <- ggplot(profiles, aes(position, mean, colour = topology, fill = topology)) +
@@ -132,8 +141,8 @@ p_sig <- ggplot(profiles, aes(position, mean, colour = topology, fill = topology
   geom_line(linewidth = 0.8) +
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
   facet_wrap(~ genotype, nrow = 1) +
-  scale_colour_manual(values = topology_palette, labels = topo_labs, name = "Topology") +
-  scale_fill_manual(values = topology_palette, labels = topo_labs, name = "Topology") +
+  scale_colour_manual(values = topology_palette, labels = topo_labs_n, name = "Topology") +
+  scale_fill_manual(values = topology_palette, labels = topo_labs_n, name = "Topology") +
   labs(x = "Distance to TSS (bp)", y = "Mean per-motif G4 signal",
        title = "Promoter G4 signal at individual motifs, by topology and position",
        subtitle = sprintf("Every motif within TSS +/- %d bp; signal = motif centre +/- %d bp; strand-aware",
@@ -146,7 +155,7 @@ dens <- profiles %>% distinct(topology, bin, position, n_motifs)
 p_den <- ggplot(dens, aes(position, n_motifs, colour = topology)) +
   geom_line(linewidth = 0.9) +
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
-  scale_colour_manual(values = topology_palette, labels = topo_labs, name = "Topology") +
+  scale_colour_manual(values = topology_palette, labels = topo_labs_n, name = "Topology") +
   labs(x = "Distance to TSS (bp)", y = "G4 motifs (count per bin)",
        title = "Where G4 topologies sit relative to the TSS",
        subtitle = sprintf("Motif positional density, TSS +/- %d bp, %d bins (genotype-independent)",

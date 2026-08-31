@@ -238,6 +238,12 @@ metaprofile:
   n_bins: 80
   include_none_group: true
   max_per_group: 16000
+  # Minimum regions a (topology, direction) stratum needs before it is profiled.
+  # Was hard-coded 5 in rules 31/32, which silently deleted whole facet rows once
+  # rule 21 stopped back-filling G4SP's abstentions. Sparse strata are now drawn
+  # with their n annotated; only 0-region strata are skipped (they cannot be
+  # profiled at all).
+  min_regions_per_panel: 1
   normalize_promoter_to_none: true
   feature_regions: ["promoter", "5UTR", "intron1", "enhancer"]
   feature_fixed_ymax: 30

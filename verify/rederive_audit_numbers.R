@@ -5,7 +5,20 @@
 # Each block stopifnot()s its own claim.
 #
 # Run from the repository root:  Rscript verify/rederive_audit_numbers.R
+#
+# The expected values below are the v1.0 numbers REVIEW.md was written against,
+# so this check must read v1.0 tables. Once the v1.1 pipeline has been run,
+# results/tables/ no longer holds them and every block here mismatches by
+# design. Point V11_TABLES at a v1.0 export instead -- run_all.sh materialises
+# one from git automatically:
+#
+#   git --work-tree=<tmp> checkout 3c1b264 -- results/tables
+#   V11_TABLES=<tmp>/results/tables Rscript verify/rederive_audit_numbers.R
 # ---------------------------------------------------------------------------
+
+TBL <- Sys.getenv("V11_TABLES", "results/tables")
+tbl <- function(f) file.path(TBL, f)
+cat("Reading tables from: ", TBL, "\n", sep = "")
 
 ok <- function(label, value, expect, tol = 0.005) {
   pass <- isTRUE(all.equal(as.numeric(value), as.numeric(expect), tolerance = tol))
@@ -17,7 +30,7 @@ ok <- function(label, value, expect, tol = 0.005) {
 
 cat("=== 2.1 Topology: kappa and the back-fill shares ===\n")
 
-conc <- read.csv("results/tables/topology_concordance.csv")
+conc <- read.csv(tbl("topology_concordance.csv"))
 lv <- c("parallel", "antiparallel", "hybrid")
 tab <- matrix(0, 3, 3, dimnames = list(lv, lv))
 for (i in seq_len(nrow(conc)))
@@ -39,9 +52,9 @@ ok("heuristic anti confirmed by G4SP",    tab["antiparallel","antiparallel"] /
                                             sum(tab[,"antiparallel"]), 0.0075)
 
 cat("\n=== 2.1 Back-fill share per stratum (the number the audit understated) ===\n")
-sweep <- read.csv("results/tables/topology_precision_sweep.csv")
+sweep <- read.csv(tbl("topology_precision_sweep.csv"))
 s80   <- sweep[sweep$precision == "0.80", ]
-cmp   <- read.csv("results/tables/topology_composition_compare.csv")
+cmp   <- read.csv(tbl("topology_composition_compare.csv"))
 peak  <- cmp[cmp$level == "Per peak (top PQS)", ]
 getn  <- function(t) peak$n[peak$topology == t]
 
@@ -64,7 +77,7 @@ ok("n_mixed at precision default",
    sweep$n_mixed[sweep$precision == "default"], 0, tol = 0)
 
 cat("\n=== 2.2 Peak caller: ERCC controls yield more peaks than the real samples ===\n")
-ps <- read.csv("results/tables/peak_summary.csv")
+ps <- read.csv(tbl("peak_summary.csv"))
 gv <- function(s) ps$n_peaks[ps$set == s]
 ok("G4_BG4_WT peaks",       gv("G4_BG4_WT"),       107276, tol = 0)
 ok("G4_BG4_ERCCKO peaks",   gv("G4_BG4_ERCCKO"),   114980, tol = 0)
@@ -78,7 +91,7 @@ ok("BG4 union, % of mm10",  100 * ps$total_Mbp[ps$set == "G4_BG4_union"] * 1e6 /
 ok("S9.6 union, % of mm10", 100 * ps$total_Mbp[ps$set == "Rloop_S96_union"] * 1e6 / mm10, 10.5, tol = 0.05)
 
 cat("\n=== 2.5 Enrichment null: promoter footprint is un-merged ===\n")
-fe <- read.csv("results/tables/region_fold_enrichment.tsv", sep = "\t")
+fe <- read.csv(tbl("region_fold_enrichment.tsv"), sep = "\t")
 wtp <- fe[fe$assay == "G4_BG4" & fe$genotype == "WT" & fe$region == "promoter", ]
 genome_bp <- 2633776672
 implied_bp <- wtp$exp_mean / gv("G4_BG4_WT") * genome_bp
@@ -100,13 +113,13 @@ stopifnot(rl("ERCCWT") > rl("WT"), rl("ERCCKO") > rl("WT"))
 cat("  [PASS] ERCC R-loop promoter enrichment EXCEEDS the real WT track\n")
 
 cat("\n=== 2.3 DeepG4 sanity metrics ===\n")
-sm <- read.csv("results/tables/sanity_metrics.csv")
+sm <- read.csv(tbl("sanity_metrics.csv"))
 gm <- function(m) sm$value[sm$metric == m]
 ok("AUROC vs GC-matched background", gm("auroc_peak_vs_background"), 0.5632)
 ok("Spearman rho vs max_z",          gm("spearman_prob_vs_maxz_SUPPL"), 0.1311)
 
 cat("\n=== 2.3 g4hunter_pqs already IS the working metric ===\n")
-cv <- read.csv("results/tables/propensity_crossvalidation.csv")
+cv <- read.csv(tbl("propensity_crossvalidation.csv"))
 gr <- function(a, b) cv$spearman_rho[cv$metric_a == a & cv$metric_b == b]
 ok("g4hunter_pqs vs pqsfinder_score", gr("g4hunter_pqs", "pqsfinder_score"), 0.635)
 ok("g4hunter_pqs vs deepg4_prob",     gr("g4hunter_pqs", "deepg4_prob"),     0.330)
@@ -114,13 +127,13 @@ ok("g4hunter_win vs pqsfinder_score", gr("g4hunter_win", "pqsfinder_score"), 0.0
 cat("  [PASS] the audit's 'replace g4hunter_win' fix already exists as g4hunter_pqs\n")
 
 cat("\n=== 2.4 Strand: the tautology ===\n")
-sb <- read.csv("results/tables/strand_bias_relative.tsv", sep = "\t")
+sb <- read.csv(tbl("strand_bias_relative.tsv"), sep = "\t")
 stopifnot(all(sb$count_against == 0), all(sb$pct_with == 100))
 cat(sprintf("  [PASS] count_against == 0 in all %d rows; pct_with == 100 in all\n", nrow(sb)))
-ds <- read.csv("results/tables/g4_detection_by_strand.tsv", sep = "\t")
+ds <- read.csv(tbl("g4_detection_by_strand.tsv"), sep = "\t")
 stopifnot(all(ds$pct_with_motif == 100))
 cat(sprintf("  [PASS] pct_with_motif == 100 in all %d rows (g4_threshold 0.0)\n", nrow(ds)))
-ss <- read.csv("results/tables/strand_bias_summary.tsv", sep = "\t")
+ss <- read.csv(tbl("strand_bias_summary.tsv"), sep = "\t")
 m <- merge(sb, ss, by = c("genotype", "region_type", "window_size"))
 wt_p <- m[m$genotype == "WT" & m$region_type == "promoter" & m$window_size == 250, ]
 cat(sprintf("  WT promoter 250: gene-relative n=%d vs genomic-strand n=%d (%.1f%% retained)\n",
@@ -129,28 +142,28 @@ cat(sprintf("  across all 16 cells: %d of %d peaks kept (%.1f%%) -- the rest mat
             sum(m$n_total.x), sum(m$n_total.y), 100 * sum(m$n_total.x) / sum(m$n_total.y)))
 cat("  same-strand gene, returned NA, and were dropped rather than counted 'against'\n")
 stopifnot(sum(m$n_total.x) < sum(m$n_total.y))
-gs <- read.csv("results/tables/g4_score_stats.tsv", sep = "\t")
+gs <- read.csv(tbl("g4_score_stats.tsv"), sep = "\t")
 cat(sprintf("  observed |G4Hunter window mean| range: %.3f - %.3f (cutoff 1.2 unreachable)\n",
             min(gs$mean_g4), max(gs$mean_g4)))
 stopifnot(max(gs$mean_g4) < 1.2)
 cat("  [PASS] the audit's prescribed g4_threshold=1.2 would have emptied the table\n")
 
 cat("\n=== 2.8 The expression endpoint is null ===\n")
-pe2 <- read.csv("results/tables/promoter_g4_expression_tests.csv")
+pe2 <- read.csv(tbl("promoter_g4_expression_tests.csv"))
 stopifnot(all(pe2$wilcox_parallel_vs_noG4_p > 0.05))
 cat(sprintf("  [PASS] headline Wilcoxon non-significant in all 3 KOs: p = %s\n",
             paste(round(pe2$wilcox_parallel_vs_noG4_p, 3), collapse = " / ")))
 cat(sprintf("  median |LFC| differences: %s\n",
             paste(sprintf("%.4f", pe2$median_absLFC_parallel - pe2$median_absLFC_noG4),
                   collapse = " / ")))
-mg <- read.csv("results/tables/multiG4_expression_stats.csv")
+mg <- read.csv(tbl("multiG4_expression_stats.csv"))
 ok("Spearman nG4 vs log baseMean",
    mg$statistic[mg$metric == "spearman_nG4_vs_log_baseMean"], 0.0217)
 stopifnot(all(mg$p_value[mg$metric == "kruskal_absLFC_by_bucket"] > 0.05))
 cat("  [PASS] all three Kruskal tests on |LFC| by G4-count bucket are null\n")
 
 cat("\n=== 2.1 Control benchmark: G4SP is externally validated, the heuristic is not ===\n")
-cb <- read.csv("results/tables/g4sp_control_benchmark.csv")
+cb <- read.csv(tbl("g4sp_control_benchmark.csv"))
 ok("G4SP correct on controls", sum(cb$correct == "True" | cb$correct == TRUE), 8, tol = 0)
 hb <- "verify/topology_control_benchmark_compare.csv"
 if (file.exists(hb)) {

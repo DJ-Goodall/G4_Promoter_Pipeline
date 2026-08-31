@@ -10,6 +10,9 @@
 # --- Machine-specific path overlay (template: config.local.example.yaml) ----
 config/config.local.yaml
 
+# Merged config the Snakefile regenerates on every run and every rule reads.
+config/config.effective.yaml
+
 # --- Regenerable pipeline state --------------------------------------------
 cache/
 logs/

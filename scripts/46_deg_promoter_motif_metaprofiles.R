@@ -12,7 +12,8 @@
 # Inputs:   cache/promoter_motif_signal.rds (rule 30), results/tables/deseq2_KO_vs_WT.csv
 # Outputs:  results/tables/deg_promoter_motif_profiles.csv
 #           results/figures/10_metaprofiles/{deg_motif_topology_grid,
-#             deg_motif_pooled,deg_motif_density}.{pdf,png}
+#             deg_motif_pooled,deg_motif_pooled_unfiltered,
+#             deg_motif_density}.{pdf,png}
 # ============================================================================
 
 suppressPackageStartupMessages({
@@ -34,20 +35,27 @@ n_bins     <- mcfg$n_bins %||% cfg$metaprofile$n_bins %||% 80
 grid_kos   <- as.character(unlist(cfg$metaprofile$deg_grid_kos %||% c("DHX36KO", "dKO")))
 deg_padj   <- cfg$metaprofile$deg_padj %||% 0.05
 deg_lfc    <- cfg$metaprofile$deg_lfc %||% 0.5
-deg_ymax   <- cfg$metaprofile$deg_fixed_ymax %||% 28
-definite   <- c("parallel", "antiparallel", "hybrid")
+# NB: metaprofile.deg_fixed_ymax (28) is deliberately NOT used here. It caps rule
+# 31's window-AVERAGED promoter profile; this script plots a per-motif POINT
+# statistic (motif centre +/- signal_half_width) whose values reach ~395, so the
+# same cap clipped most of the grid into flat-topped noise. Rows autoscale instead.
+definite   <- topology_definite            # v1.1: shared, was a local copy
 dir_cols   <- c(up = "#E41A1C", down = "#377EB8")
 dir_labels <- c(up = "Upregulated", down = "Downregulated")
 
-pm <- readRDS("cache/promoter_motif_signal.rds")          # rule 30 cache
-# v1.1: definite-only is deliberate (see rule 45) -- a topology-resolved grid
-# cannot include motifs G4SP declined to assign. Reported, not silent, because
-# rule 43 no longer back-fills those abstentions.
+pm <- readRDS("cache/promoter_motif_signal.rds")          # rule 45 cache
+# v1.1 (2026-08-11): definite-only dropped 23.5% of promoter motifs once rule 43
+# stopped back-filling the G4SP abstentions -- and dropped them from the
+# denominator too, so the figure could not show that they existed. "mixed" is now
+# its own row, as in rules 24/30/33. incl_none = FALSE: every motif IS a PQS, so
+# there is no "no G4 peak" class here.
+keep_groups <- topology_keep_groups(pm$topology, incl_none = FALSE)
 n_pre <- nrow(pm)
-pm <- pm[pm$topology %in% definite, ]
+pm <- pm[pm$topology %in% keep_groups, ]
 message(sprintf(
-  "Motifs profiled: %d / %d (%.1f%% excluded as mixed/unclassified)",
+  "Motifs profiled: %d / %d (%.1f%% excluded as unclassified)",
   nrow(pm), n_pre, 100 * (1 - nrow(pm) / max(n_pre, 1))))
+message("Motifs per topology:"); print(table(pm$topology))
 pm$symbol <- AnnotationDbi::mapIds(org.Mm.eg.db, keys = as.character(pm$prom_entrez),
                                    column = "SYMBOL", keytype = "ENTREZID", multiVals = "first")
 pm <- pm[!is.na(pm$symbol), ]
@@ -96,51 +104,85 @@ if (nrow(profiles) == 0) stop("No DEG-promoter motif profiles computed.")
 
 col_levels <- unlist(lapply(grid_kos, function(g) c(sprintf("WT (%s DEGs)", g), g)))
 profiles$column    <- factor(profiles$column, levels = col_levels)
-profiles$topology  <- factor(profiles$topology, levels = definite)
+profiles$topology  <- factor(profiles$topology, levels = keep_groups)
 profiles$direction <- factor(profiles$direction, levels = c("up", "down"))
 readr::write_csv(profiles, "results/tables/deg_promoter_motif_profiles.csv")
 
-topo_labs <- setNames(topology_labels[match(definite, topology_levels)], definite)
+topo_labs <- topology_group_labels(keep_groups)
 sub_base  <- sprintf("motifs within TSS +/- %d bp; significant DEGs (padj<%g & |log2FC|>%g); WT-matched vs KO",
                      hw, deg_padj, deg_lfc)
 
-# --- (A) topology x column grid (shared y 0..deg_ymax) ----------------------
+# Total motifs behind each panel. Each motif contributes to exactly ONE of the
+# n_bins bins (unlike rule 31, where every promoter contributes to every bin), so
+# a panel's n divided by n_bins is roughly its per-bin support -- which is the
+# number that decides whether a wiggle means anything. Annotate it.
+strat_n <- profiles %>%
+  group_by(column, topology, direction) %>%
+  summarise(n = sum(n_motifs), .groups = "drop")
+
+# --- (A) topology x column grid (y autoscaled per topology row) -------------
 p_grid <- ggplot(profiles, aes(position, mean, colour = direction, fill = direction)) +
   geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA) +
   geom_line(linewidth = 0.8) +
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
-  facet_grid(topology ~ column, labeller = labeller(topology = topo_labs)) +
-  coord_cartesian(ylim = c(0, deg_ymax)) +
+  geom_text(data = panel_n_labels(strat_n, c("topology", "column"), "n"),
+            aes(x = -Inf, y = Inf, label = label),
+            inherit.aes = FALSE, hjust = -0.08, vjust = 1.4, size = 2.8, colour = "grey20") +
+  facet_grid(topology ~ column, scales = "free_y", drop = FALSE,
+             labeller = labeller(topology = topo_labs)) +
   scale_colour_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
   scale_fill_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
   labs(x = "Distance to TSS (bp)", y = "Mean per-motif G4 signal",
        title = "DEG promoter G4 signal at individual motifs, by direction and topology",
-       subtitle = sprintf("%s; shared y 0-%g", sub_base, deg_ymax)) +
+       subtitle = sprintf(paste("%s; y autoscaled per topology row (magnitudes differ ~10x);",
+                                "n = motifs behind each panel, spread over %d bins"),
+                          sub_base, n_bins)) +
   theme_pub() + theme(legend.position = "bottom")
 save_plot(p_grid, "deg_motif_topology_grid", "10_metaprofiles", fig_root, width = 13, height = 8)
 
-# --- (B) pooled (G4+ topologies merged, auto y) -----------------------------
-pooled <- profiles %>%
-  group_by(column, ko, direction, bin, position) %>%
-  summarise(mean = weighted.mean(mean, n_motifs), n_motifs = sum(n_motifs),
-            sem = sqrt(sum((sem * n_motifs)^2)) / sum(n_motifs), .groups = "drop")
-pooled$column <- factor(pooled$column, levels = col_levels)
-p_pool <- ggplot(pooled, aes(position, mean, colour = direction, fill = direction)) +
-  geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA) +
-  geom_line(linewidth = 0.8) +
-  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
-  facet_wrap(~ column, nrow = 1) +
-  scale_colour_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
-  scale_fill_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
-  labs(x = "Distance to TSS (bp)", y = "Mean per-motif G4 signal",
-       title = "DEG promoter G4 signal at motifs by direction (G4 topologies pooled)",
-       subtitle = sprintf("%s; auto y-axis", sub_base)) +
-  theme_pub() + theme(legend.position = "bottom")
-save_plot(p_pool, "deg_motif_pooled", "10_metaprofiles", fig_root, width = 13, height = 4)
+# --- (B) pooled, in two arms exactly as rule 31 does it ---------------------
+#   "pooled"     -> the three definite classes only (weighted average of the grid
+#                   rows), so the number stays comparable with rule 31's pooled panel.
+#   "unfiltered" -> every motif, mixed included. Without this arm the only pooled
+#                   motif figure would still discard 23.5% of the data silently,
+#                   which is the defect class the 2026-08-07 audit raised.
+# na.rm throughout: a bin holding a single motif has sd = NA, and without it one
+# such bin in any topology nulled that bin's pooled mean and ribbon entirely.
+build_pooled <- function(df, fname, title, subtitle) {
+  pooled <- df %>%
+    group_by(column, ko, direction, bin, position) %>%
+    summarise(mean = weighted.mean(mean, n_motifs, na.rm = TRUE),
+              n_motifs = sum(n_motifs),
+              sem = sqrt(sum((sem * n_motifs)^2, na.rm = TRUE)) / sum(n_motifs),
+              .groups = "drop")
+  pooled$column <- factor(pooled$column, levels = col_levels)
+  panel_n <- pooled %>% group_by(column, direction) %>%
+    summarise(n = sum(n_motifs), .groups = "drop")
+  p <- ggplot(pooled, aes(position, mean, colour = direction, fill = direction)) +
+    geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA) +
+    geom_line(linewidth = 0.8) +
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
+    geom_text(data = panel_n_labels(panel_n, "column", "n"),
+              aes(x = -Inf, y = Inf, label = label),
+              inherit.aes = FALSE, hjust = -0.08, vjust = 1.4, size = 3, colour = "grey20") +
+    facet_wrap(~ column, nrow = 1) +
+    scale_colour_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
+    scale_fill_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
+    labs(x = "Distance to TSS (bp)", y = "Mean per-motif G4 signal",
+         title = title, subtitle = subtitle) +
+    theme_pub() + theme(legend.position = "bottom")
+  save_plot(p, fname, "10_metaprofiles", fig_root, width = 13, height = 4)
+}
+build_pooled(profiles %>% dplyr::filter(topology %in% definite), "deg_motif_pooled",
+             "DEG promoter G4 signal at motifs by direction (G4 topologies pooled)",
+             sprintf("%s; parallel+antiparallel+hybrid pooled (mixed excluded); auto y-axis", sub_base))
+build_pooled(profiles, "deg_motif_pooled_unfiltered",
+             "DEG promoter G4 signal at motifs by direction (all motifs - no topology filter)",
+             sprintf("%s; ALL motifs incl. mixed/unresolved; auto y-axis", sub_base))
 
 # --- (C) motif density by topology x direction, per KO ----------------------
 dens <- bind_rows(dens_rows)
-dens$topology  <- factor(dens$topology, levels = definite)
+dens$topology  <- factor(dens$topology, levels = keep_groups)
 dens$direction <- factor(dens$direction, levels = c("up", "down"))
 dens$ko        <- factor(dens$ko, levels = grid_kos)
 p_den <- ggplot(dens, aes(position, n_motifs, colour = topology)) +

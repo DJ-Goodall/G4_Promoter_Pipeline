@@ -14,9 +14,11 @@ run () {
   echo "=============================================================="
   echo "  $1"
   echo "=============================================================="
-  if "$RSCRIPT" "$2" 2>&1 | grep -v "built under R version"; then :; fi
-  # shellcheck disable=SC2181
-  if [ "${PIPESTATUS[0]}" -ne 0 ]; then echo "!! FAILED: $2"; fail=1; fi
+  # Do NOT wrap this in `if ...; then :; fi` -- the `:` runs after the pipeline
+  # and resets PIPESTATUS, which silently made every check report success.
+  "$RSCRIPT" "$2" 2>&1 | grep -v "built under R version"
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" -ne 0 ]; then echo "!! FAILED: $2 (exit $rc)"; fail=1; fi
 }
 
 echo "### Static syntax check ###"
@@ -28,8 +30,29 @@ for f in scripts/*.R scripts/_shared/*.R verify/*.R; do
   fi
 done
 
+# Check 1 asserts the v1.0 numbers REVIEW.md was written against, so it must read
+# v1.0 tables. Once v1.1 has been run, results/tables/ holds the new ones and every
+# assertion mismatches by design -- so materialise the v1.0 tables from git instead.
+V10_REF="${V10_REF:-3c1b264}"
+V10_TREE="$(mktemp -d)"
+# git archive is used rather than `git checkout -- <path>`: it writes only to the
+# temp dir and never touches the index or the working tree.
+if git rev-parse --verify --quiet "$V10_REF" >/dev/null &&
+   git archive "$V10_REF" results/tables | tar -x -C "$V10_TREE"; then
+  export V11_TABLES="$V10_TREE/results/tables"
+  echo ""
+  echo "Check 1 reads the v1.0 tables from $V10_REF (V11_TABLES=$V11_TABLES)"
+else
+  echo ""
+  echo "!! v1.0 ref '$V10_REF' not found -- check 1 will read the working tree and"
+  echo "   will fail if v1.1 has been run. Set V10_REF to the v1.0 commit."
+fi
+
 run "1. Re-derive every REVIEW.md number from the committed v1.0 tables" \
     verify/rederive_audit_numbers.R
+
+unset V11_TABLES
+rm -rf "$V10_TREE"
 
 run "2. G4Hunter: window mean vs sliding max, and why 1.2 works for neither" \
     verify/test_g4hunter.R

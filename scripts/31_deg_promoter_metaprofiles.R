@@ -49,7 +49,8 @@ deg_padj   <- cfg$metaprofile$deg_padj %||% 0.05
 deg_lfc    <- cfg$metaprofile$deg_lfc %||% 0.5
 deg_ymax   <- cfg$metaprofile$deg_fixed_ymax %||% 28    # grid y-cap (pooled plot uses auto y)
 max_group  <- cfg$metaprofile$max_per_group %||% 8000
-definite   <- c("parallel", "antiparallel", "hybrid")
+min_regions <- max(1L, as.integer(cfg$metaprofile$min_regions_per_panel %||% 1))
+definite   <- topology_definite            # v1.1: shared, was a local copy
 dir_cols   <- c(up = "#E41A1C", down = "#377EB8")
 dir_labels <- c(up = "Upregulated", down = "Downregulated")
 
@@ -57,6 +58,16 @@ dir_labels <- c(up = "Upregulated", down = "Downregulated")
 union <- readRDS("cache/peaks.rds")$union
 topo  <- readr::read_csv("results/tables/peak_topology.csv", show_col_types = FALSE)
 union$topology <- as.character(topo$topology_final[match(names(union), topo$peak_id)])
+
+# v1.1: which topology rows the grid displays. "mixed" is G4SP's abstention class
+# and a terminal stratum now that rule 21 no longer back-fills it; a hard-coded
+# `definite` computed it in no region set at all, so it left the figure without
+# ever reaching a denominator. Measured 2026-08-11: 36-71 DEG promoters per
+# (ko, direction) -- more than antiparallel and hybrid combined, which is why it
+# has to be shown. "none" is excluded here: the no-G4-peak promoters (the large
+# majority, ~750 of 1039 for dKO up) are already the difference between the
+# "pooled" and "unfiltered" panels. See topology_keep_groups() in helpers.R.
+keep_groups <- topology_keep_groups(union$topology, incl_none = FALSE)
 
 prom <- readRDS(file.path(cfg$paths$cache_v2, cfg$feature$region_files$promoter))
 GenomeInfoDb::seqlevelsStyle(prom) <- "UCSC"
@@ -86,7 +97,7 @@ bw_meta <- build_bw_meta(cfg$paths$bigwig_dir, genotypes = cfg$genotypes, assay 
 # Promoter subsampling is done ONCE per (group, direction) upstream so the
 # matched-WT and KO columns are computed on IDENTICAL promoter sets.
 profile_or_null <- function(regions, bws, ko, signal_geno, tp, dir) {
-  if (length(regions) < 5) return(NULL)
+  if (length(regions) < min_regions) return(NULL)
   prof <- mean_replicate_profile(regions, bws, n_bins = n_bins, half_width = half_width)
   prof$ko <- ko; prof$signal_geno <- signal_geno
   prof$topology <- tp; prof$direction <- dir; prof$n_promoters <- length(regions)
@@ -95,7 +106,7 @@ profile_or_null <- function(regions, bws, ko, signal_geno, tp, dir) {
 
 set.seed(7)
 wt_bws <- bw_meta$filepath[bw_meta$genotype == ref_geno]   # WT G4 bigWigs (matched control)
-all_rows <- list()
+all_rows <- list(); count_rows <- list()
 for (k in grid_kos) {
   dek <- de %>% dplyr::filter(ko == k, !is.na(padj), !is.na(log2FC))
   dek$direction <- dplyr::case_when(
@@ -124,16 +135,23 @@ for (k in grid_kos) {
   #   "pooled"     -> G4+ (definite) topologies only: a true weighted average of the grid
   #                   rows; the no-G4-peak ("none") group excluded so it cannot dilute.
   #   "unfiltered" -> ALL DEG promoters (any group incl. none/mixed): no G4 filter at all.
-  # "unfiltered" is appended LAST so the RNG draw order for the existing definite/pooled
-  # sets is untouched (defensive; no set trips max_group here anyway).
+  # "unfiltered" and the extra keep_groups strata ("mixed") are appended LAST so the
+  # RNG draw order for the existing definite/pooled sets is untouched (defensive; no
+  # set trips max_group here anyway).
   region_sets <- list()
-  for (tp in c("pooled", definite, "unfiltered")) for (dir in c("up", "down")) {
-    regs <- if (tp == "unfiltered") tk[tk$direction == dir]
-            else if (tp == "pooled") tk[tk$direction == dir & tk$group %in% definite]
-            else tk[tk$direction == dir & tk$group == tp]
-    if (length(regs) > max_group) regs <- regs[sample(length(regs), max_group)]
-    region_sets[[paste(tp, dir, sep = "@@")]] <- regs
-  }
+  for (tp in c("pooled", definite, "unfiltered", setdiff(keep_groups, definite)))
+    for (dir in c("up", "down")) {
+      regs <- if (tp == "unfiltered") tk[tk$direction == dir]
+              else if (tp == "pooled") tk[tk$direction == dir & tk$group %in% definite]
+              else tk[tk$direction == dir & tk$group == tp]
+      if (length(regs) > max_group) regs <- regs[sample(length(regs), max_group)]
+      region_sets[[paste(tp, dir, sep = "@@")]] <- regs
+      # Record the true n BEFORE the min_regions guard, so a stratum too small to
+      # profile still reports its size instead of vanishing from the counts table.
+      count_rows[[length(count_rows) + 1]] <-
+        data.frame(ko = k, filter = tp, direction = dir, n = length(regs),
+                   stringsAsFactors = FALSE)
+    }
 
   # Column order in the figures: WT-matched control THEN the KO itself.
   for (sg in c(ref_geno, k)) {
@@ -163,31 +181,47 @@ profiles$ko        <- factor(profiles$ko, levels = grid_kos)
 profiles$direction <- factor(profiles$direction, levels = c("up", "down"))
 readr::write_csv(profiles, "results/tables/deg_promoter_profiles.csv")
 
+# --- Stratum sizes, including the strata too small to profile ---------------
+# Built from the region sets, NOT from `profiles`: a stratum below min_regions is
+# never profiled, so deriving the counts from the profiles would have deleted the
+# very rows a reader needs in order to see why a facet is empty. Defined here
+# rather than beside its figure because the grid annotation below reads it.
+filter_levels <- c("unfiltered", "pooled", keep_groups)
+filter_labels <- c(unfiltered = "All DEGs", pooled = "G4+ (pooled)",
+                   topology_group_labels(keep_groups))
+counts <- dplyr::bind_rows(count_rows) %>%
+  dplyr::filter(filter %in% filter_levels)
+counts$filter    <- factor(counts$filter, levels = filter_levels)
+counts$ko        <- factor(counts$ko, levels = grid_kos)
+counts$direction <- factor(counts$direction, levels = c("up", "down"))
+readr::write_csv(counts, "results/tables/deg_promoter_counts.csv")
+
+# The matched-WT column and the KO column are profiled over IDENTICAL promoter
+# sets, so one count serves both; expand each ko into its two grid columns.
+grid_n <- counts %>% dplyr::filter(filter %in% keep_groups) %>%
+  dplyr::rename(topology = filter)
+grid_n <- dplyr::bind_rows(
+  grid_n %>% dplyr::mutate(column = sprintf("WT (%s DEGs)", ko)),
+  grid_n %>% dplyr::mutate(column = as.character(ko)))
+grid_n$column   <- factor(grid_n$column, levels = col_levels)
+grid_n$topology <- factor(as.character(grid_n$topology), levels = keep_groups)
+
 sub_base <- sprintf(paste0("+/- %d bp, %d bins; significant DEGs (padj<%g & |log2FC|>%g); ",
                            "WT-matched control vs KO G4 signal"),
                     half_width, n_bins, deg_padj, deg_lfc)
 
 # --- (B) pooled figures (auto y-axis; per-panel up/down n annotation) --------
 # Per-column "up N / down M" label (matched WT and KO columns share identical sets).
-panel_counts <- function(df) {
-  up <- df %>% dplyr::filter(direction == "up") %>%
-    dplyr::distinct(column, n_promoters) %>% dplyr::rename(n_up = n_promoters)
-  dn <- df %>% dplyr::filter(direction == "down") %>%
-    dplyr::distinct(column, n_promoters) %>% dplyr::rename(n_down = n_promoters)
-  m <- merge(up, dn, by = "column", all = TRUE)
-  m$label <- sprintf("up %s / down %s",
-                     ifelse(is.na(m$n_up), "0", as.character(m$n_up)),
-                     ifelse(is.na(m$n_down), "0", as.character(m$n_down)))
-  m$column <- factor(m$column, levels = levels(df$column))
-  m
-}
+# panel_n_labels() lives in helpers.R -- the grid below needs the same label keyed
+# on (topology, column), so the local copy this replaced would have been duplicated.
 build_pooled <- function(topo_key, fname, title, subtitle) {
   df <- profiles %>% dplyr::filter(topology == topo_key)
   p <- ggplot(df, aes(position, mean, colour = direction, fill = direction)) +
     geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA) +
     geom_line(linewidth = 0.8) +
     geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
-    geom_text(data = panel_counts(df), aes(x = -Inf, y = Inf, label = label),
+    geom_text(data = panel_n_labels(df, "column", "n_promoters"),
+              aes(x = -Inf, y = Inf, label = label),
               inherit.aes = FALSE, hjust = -0.08, vjust = 1.4, size = 3, colour = "grey20") +
     facet_wrap(~ column, nrow = 1) +
     scale_colour_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
@@ -205,35 +239,32 @@ build_pooled("unfiltered", "deg_promoter_pooled_unfiltered",
              sprintf("%s; ALL DEG promoters incl. no-G4-peak and mixed; auto y-axis", sub_base))
 
 # --- (A) topology x column grid ---------------------------------------------
-grid <- profiles %>% dplyr::filter(topology %in% definite)
-grid$topology <- factor(grid$topology, levels = definite)
-topo_labs <- setNames(topology_labels[match(definite, topology_levels)], definite)
+# drop = FALSE keeps a stratum's row visible even when it holds no promoters at
+# all, so "no data" reads differently from "no signal"; the n annotation says which.
+grid <- profiles %>% dplyr::filter(topology %in% keep_groups)
+grid$topology <- factor(grid$topology, levels = keep_groups)
+topo_labs <- topology_group_labels(keep_groups)
 p_grid <- ggplot(grid, aes(position, mean, colour = direction, fill = direction)) +
   geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA) +
   geom_line(linewidth = 0.8) +
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
-  facet_grid(topology ~ column, labeller = labeller(topology = topo_labs)) +
+  geom_text(data = panel_n_labels(grid_n, c("topology", "column"), "n"),
+            aes(x = -Inf, y = Inf, label = label),
+            inherit.aes = FALSE, hjust = -0.08, vjust = 1.4, size = 2.8, colour = "grey20") +
+  facet_grid(topology ~ column, drop = FALSE,
+             labeller = labeller(topology = topo_labs)) +
   coord_cartesian(ylim = c(0, deg_ymax)) +
   scale_colour_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
   scale_fill_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
   labs(x = "Distance to TSS (bp)", y = "Mean G4 CUT&Tag signal",
        title = "Promoter G4 signal at DEGs by direction and G4 topology",
-       subtitle = sprintf("%s; shared y-axis 0-%g", sub_base, deg_ymax)) +
+       subtitle = sprintf("%s; shared y-axis 0-%g (lines above %g are clipped); n per panel",
+                          sub_base, deg_ymax, deg_ymax)) +
   theme_pub() + theme(legend.position = "bottom")
 save_plot(p_grid, "deg_promoter_topology_grid", "10_metaprofiles", fig_root,
           width = 13, height = 8)
 
 # --- (C) standalone gene-count summary (how many promoters feed each panel) --
-filter_levels <- c("unfiltered", "pooled", "parallel", "antiparallel", "hybrid")
-filter_labels <- c(unfiltered = "All DEGs", pooled = "G4+ (pooled)", parallel = "Parallel",
-                   antiparallel = "Antiparallel", hybrid = "Hybrid")
-counts <- profiles %>%
-  dplyr::distinct(ko, topology, direction, n_promoters) %>%
-  dplyr::rename(filter = topology, n = n_promoters) %>%
-  dplyr::filter(filter %in% filter_levels)
-counts$filter <- factor(counts$filter, levels = filter_levels)
-readr::write_csv(counts, "results/tables/deg_promoter_counts.csv")
-
 p_counts <- ggplot(counts, aes(filter, n, fill = direction)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
   geom_text(aes(label = n), position = position_dodge(width = 0.8),
@@ -243,11 +274,17 @@ p_counts <- ggplot(counts, aes(filter, n, fill = direction)) +
   scale_x_discrete(labels = filter_labels) +
   labs(x = NULL, y = "DEG promoters (n)",
        title = "DEG promoters per metaprofile panel",
-       subtitle = "All DEGs = no-G4 filter; G4+ (pooled) = parallel+antiparallel+hybrid") +
+       subtitle = paste("All DEGs = no-G4 filter; G4+ (pooled) = parallel+antiparallel+hybrid;",
+                        "counted before the min-n profiling guard")) +
   theme_pub() + theme(legend.position = "bottom",
                       axis.text.x = element_text(angle = 30, hjust = 1))
 save_plot(p_counts, "deg_promoter_counts", "10_metaprofiles", fig_root, width = 10, height = 5)
 
-message("Done. DEG-promoter meta-profiles (WT-matched + KO). Promoters per (ko, topology, direction):")
-print(profiles %>% dplyr::distinct(ko, topology, direction, n_promoters) %>%
-        dplyr::arrange(ko, topology, direction))
+message("Done. DEG-promoter meta-profiles (WT-matched + KO). Promoters per (ko, filter, direction):")
+print(counts %>% dplyr::arrange(ko, filter, direction))
+skipped <- counts %>% dplyr::filter(n < min_regions)
+if (nrow(skipped) > 0) {
+  message("Strata below min_regions_per_panel = ", min_regions,
+          " (facet shown empty, no curve drawn):")
+  print(skipped)
+}

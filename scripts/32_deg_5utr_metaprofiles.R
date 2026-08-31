@@ -46,7 +46,8 @@ deg_padj     <- cfg$metaprofile$deg_padj %||% 0.05
 deg_lfc      <- cfg$metaprofile$deg_lfc %||% 0.5
 grid_ymax    <- cfg$metaprofile$deg_5utr_grid_ymax %||% 40   # grid y-cap (pooled uses auto y)
 max_group    <- cfg$metaprofile$max_per_group %||% 8000
-definite     <- c("parallel", "antiparallel", "hybrid")
+min_regions  <- max(1L, as.integer(cfg$metaprofile$min_regions_per_panel %||% 1))
+definite     <- topology_definite          # v1.1: shared, was a local copy
 dir_cols     <- c(up = "#E41A1C", down = "#377EB8")
 dir_labels   <- c(up = "Upregulated", down = "Downregulated")
 
@@ -54,6 +55,14 @@ dir_labels   <- c(up = "Upregulated", down = "Downregulated")
 union <- readRDS("cache/peaks.rds")$union
 topo  <- readr::read_csv("results/tables/peak_topology.csv", show_col_types = FALSE)
 union$topology <- as.character(topo$topology_final[match(names(union), topo$peak_id)])
+
+# v1.1: grid rows follow the labels actually present. "mixed" is G4SP's abstention
+# class and terminal now that rule 21 no longer back-fills it; a hard-coded
+# `definite` computed it in no region set, so those 5'UTRs left the figure without
+# reaching any denominator. Measured 2026-08-11: 19-69 per (unit, ko, direction),
+# against 0-1 antiparallel and 0-8 hybrid. "none" is excluded -- the no-G4-peak
+# 5'UTRs are already the difference between the "pooled" and "unfiltered" panels.
+keep_groups <- topology_keep_groups(union$topology, incl_none = FALSE)
 
 # --- Build topology/symbol-labelled, centre-anchored 5'UTR windows per unit --
 utr5_raw <- readRDS(file.path(cfg$paths$cache_v2, cfg$feature$region_files$`5UTR`))
@@ -93,7 +102,7 @@ wt_bws  <- bw_meta$filepath[bw_meta$genotype == ref_geno]
 # Profile a region set with given bigWigs; NULL if too few regions. (Subsampling
 # is done ONCE per (unit, group, direction) so matched-WT and KO use identical sets.)
 profile_or_null <- function(regions, bws, unit, ko, signal_geno, tp, dir) {
-  if (length(regions) < 5) return(NULL)
+  if (length(regions) < min_regions) return(NULL)
   prof <- mean_replicate_profile(regions, bws, n_bins = n_bins, half_width = half_width)
   prof$unit <- unit; prof$ko <- ko; prof$signal_geno <- signal_geno
   prof$topology <- tp; prof$direction <- dir; prof$n_5utr <- length(regions)
@@ -101,7 +110,7 @@ profile_or_null <- function(regions, bws, unit, ko, signal_geno, tp, dir) {
 }
 
 set.seed(7)
-all_rows <- list()
+all_rows <- list(); count_rows <- list()
 for (k in grid_kos) {
   dek <- de %>% dplyr::filter(ko == k, !is.na(padj), !is.na(log2FC))
   dek$direction <- dplyr::case_when(
@@ -123,19 +132,26 @@ for (k in grid_kos) {
   #   "pooled"     -> G4+ (definite) topologies only: weighted average of grid rows
   #                   (no-G4-peak "none" excluded so it cannot dilute).
   #   "unfiltered" -> ALL DEG 5'UTRs (any group incl. none/mixed): no G4 filter.
-  # "unfiltered" appended LAST so existing sets' RNG draw order is untouched.
+  # "unfiltered" and the extra keep_groups strata ("mixed") are appended LAST so
+  # existing sets' RNG draw order is untouched.
   region_sets <- list()   # key "unit@@tp@@dir"
   for (u in names(unit_windows)) {
     wu <- unit_windows[[u]]
     S4Vectors::mcols(wu)$direction <- unname(dir_map[wu$symbol])
     wu <- wu[!is.na(wu$direction)]
-    for (tp in c("pooled", definite, "unfiltered")) for (dir in c("up", "down")) {
-      regs <- if (tp == "unfiltered") wu[wu$direction == dir]
-              else if (tp == "pooled") wu[wu$direction == dir & wu$group %in% definite]
-              else wu[wu$direction == dir & wu$group == tp]
-      if (length(regs) > max_group) regs <- regs[sample(length(regs), max_group)]
-      region_sets[[paste(u, tp, dir, sep = "@@")]] <- regs
-    }
+    for (tp in c("pooled", definite, "unfiltered", setdiff(keep_groups, definite)))
+      for (dir in c("up", "down")) {
+        regs <- if (tp == "unfiltered") wu[wu$direction == dir]
+                else if (tp == "pooled") wu[wu$direction == dir & wu$group %in% definite]
+                else wu[wu$direction == dir & wu$group == tp]
+        if (length(regs) > max_group) regs <- regs[sample(length(regs), max_group)]
+        region_sets[[paste(u, tp, dir, sep = "@@")]] <- regs
+        # True n recorded BEFORE the min_regions guard, so a stratum too small to
+        # profile still reports its size instead of vanishing from the counts table.
+        count_rows[[length(count_rows) + 1]] <-
+          data.frame(unit = u, ko = k, filter = tp, direction = dir, n = length(regs),
+                     stringsAsFactors = FALSE)
+      }
     message("DEG 5'UTR (", u, ") ", k, ": ",
             sum(wu$direction == "up"), " up / ", sum(wu$direction == "down"), " down 5'UTRs")
   }
@@ -168,7 +184,33 @@ profiles$direction <- factor(profiles$direction, levels = c("up", "down"))
 profiles$unit      <- factor(profiles$unit, levels = c("fragment", "gene"))
 readr::write_csv(profiles, "results/tables/deg_5utr_profiles.csv")
 
-topo_labs <- setNames(topology_labels[match(definite, topology_levels)], definite)
+# --- Stratum sizes, including the strata too small to profile ---------------
+# Built from the region sets, NOT from `profiles`: a stratum below min_regions is
+# never profiled, so deriving the counts from the profiles would have deleted the
+# very rows a reader needs in order to see why a facet is empty. Defined here
+# rather than beside its figure because the per-unit grid annotation reads it.
+filter_levels <- c("unfiltered", "pooled", keep_groups)
+filter_labels <- c(unfiltered = "All DEGs", pooled = "G4+ (pooled)",
+                   topology_group_labels(keep_groups))
+counts <- dplyr::bind_rows(count_rows) %>%
+  dplyr::filter(filter %in% filter_levels)
+counts$filter    <- factor(counts$filter, levels = filter_levels)
+counts$unit      <- factor(counts$unit, levels = c("fragment", "gene"))
+counts$ko        <- factor(counts$ko, levels = grid_kos)
+counts$direction <- factor(counts$direction, levels = c("up", "down"))
+readr::write_csv(counts, "results/tables/deg_5utr_counts.csv")
+
+# The matched-WT column and the KO column are profiled over IDENTICAL 5'UTR sets,
+# so one count serves both; expand each ko into its two grid columns.
+grid_n <- counts %>% dplyr::filter(filter %in% keep_groups) %>%
+  dplyr::rename(topology = filter)
+grid_n <- dplyr::bind_rows(
+  grid_n %>% dplyr::mutate(column = sprintf("WT (%s DEGs)", ko)),
+  grid_n %>% dplyr::mutate(column = as.character(ko)))
+grid_n$column   <- factor(grid_n$column, levels = col_levels)
+grid_n$topology <- factor(as.character(grid_n$topology), levels = keep_groups)
+
+topo_labs <- topology_group_labels(keep_groups)
 unit_titles <- c(fragment = "all 5'UTR fragments",
                  gene     = "one TSS-proximal 5'UTR per gene")
 sub_base <- sprintf(paste0("+/- %d bp, %d bins; significant DEGs (padj<%g & |log2FC|>%g); ",
@@ -176,24 +218,15 @@ sub_base <- sprintf(paste0("+/- %d bp, %d bins; significant DEGs (padj<%g & |log
                     half_width, n_bins, deg_padj, deg_lfc)
 
 # Per-column "up N / down M" label (matched WT and KO columns share identical sets).
-panel_counts <- function(df) {
-  up <- df %>% dplyr::filter(direction == "up") %>%
-    dplyr::distinct(column, n_5utr) %>% dplyr::rename(n_up = n_5utr)
-  dn <- df %>% dplyr::filter(direction == "down") %>%
-    dplyr::distinct(column, n_5utr) %>% dplyr::rename(n_down = n_5utr)
-  m <- merge(up, dn, by = "column", all = TRUE)
-  m$label <- sprintf("up %s / down %s",
-                     ifelse(is.na(m$n_up), "0", as.character(m$n_up)),
-                     ifelse(is.na(m$n_down), "0", as.character(m$n_down)))
-  m$column <- factor(m$column, levels = levels(df$column))
-  m
-}
+# panel_n_labels() lives in helpers.R -- the grid below needs the same label keyed
+# on (topology, column), so a local copy would have been duplicated.
 build_pooled <- function(df, fname, title, subtitle) {
   p <- ggplot(df, aes(position, mean, colour = direction, fill = direction)) +
     geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA) +
     geom_line(linewidth = 0.8) +
     geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
-    geom_text(data = panel_counts(df), aes(x = -Inf, y = Inf, label = label),
+    geom_text(data = panel_n_labels(df, "column", "n_5utr"),
+              aes(x = -Inf, y = Inf, label = label),
               inherit.aes = FALSE, hjust = -0.08, vjust = 1.4, size = 3, colour = "grey20") +
     facet_wrap(~ column, nrow = 1) +
     scale_colour_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
@@ -208,19 +241,27 @@ build_pooled <- function(df, fname, title, subtitle) {
 for (u in levels(profiles$unit)) {
   pu <- profiles %>% dplyr::filter(unit == u)
 
-  grid <- pu %>% dplyr::filter(topology %in% definite)
-  grid$topology <- factor(grid$topology, levels = definite)
+  # drop = FALSE keeps a stratum's row visible even when it holds no 5'UTRs at all,
+  # so "no data" reads differently from "no signal"; the n annotation says which.
+  grid <- pu %>% dplyr::filter(topology %in% keep_groups)
+  grid$topology <- factor(grid$topology, levels = keep_groups)
   p_grid <- ggplot(grid, aes(position, mean, colour = direction, fill = direction)) +
     geom_ribbon(aes(ymin = mean - sem, ymax = mean + sem), alpha = 0.18, colour = NA) +
     geom_line(linewidth = 0.8) +
     geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
-    facet_grid(topology ~ column, labeller = labeller(topology = topo_labs)) +
+    geom_text(data = panel_n_labels(grid_n %>% dplyr::filter(unit == u),
+                                    c("topology", "column"), "n"),
+              aes(x = -Inf, y = Inf, label = label),
+              inherit.aes = FALSE, hjust = -0.08, vjust = 1.4, size = 2.8, colour = "grey20") +
+    facet_grid(topology ~ column, drop = FALSE,
+               labeller = labeller(topology = topo_labs)) +
     coord_cartesian(ylim = c(0, grid_ymax)) +
     scale_colour_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
     scale_fill_manual(values = dir_cols, labels = dir_labels, name = "DEG direction") +
     labs(x = "Distance to 5'UTR centre (bp)", y = "Mean G4 CUT&Tag signal",
          title = sprintf("5'UTR G4 signal at DEGs by direction and G4 topology (%s)", unit_titles[u]),
-         subtitle = sprintf("%s; shared y-axis 0-%g", sub_base, grid_ymax)) +
+         subtitle = sprintf("%s; shared y-axis 0-%g (lines above %g are clipped); n per panel",
+                            sub_base, grid_ymax, grid_ymax)) +
     theme_pub() + theme(legend.position = "bottom")
   save_plot(p_grid, sprintf("deg_5utr_%s_topology_grid", u), "10_metaprofiles",
             fig_root, width = 13, height = 8)
@@ -236,16 +277,6 @@ for (u in levels(profiles$unit)) {
 }
 
 # --- Standalone region-count summary (how many 5'UTRs feed each panel) ------
-filter_levels <- c("unfiltered", "pooled", "parallel", "antiparallel", "hybrid")
-filter_labels <- c(unfiltered = "All DEGs", pooled = "G4+ (pooled)", parallel = "Parallel",
-                   antiparallel = "Antiparallel", hybrid = "Hybrid")
-counts <- profiles %>%
-  dplyr::distinct(unit, ko, topology, direction, n_5utr) %>%
-  dplyr::rename(filter = topology, n = n_5utr) %>%
-  dplyr::filter(filter %in% filter_levels)
-counts$filter <- factor(counts$filter, levels = filter_levels)
-readr::write_csv(counts, "results/tables/deg_5utr_counts.csv")
-
 p_counts <- ggplot(counts, aes(filter, n, fill = direction)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
   geom_text(aes(label = n), position = position_dodge(width = 0.8),
@@ -255,11 +286,17 @@ p_counts <- ggplot(counts, aes(filter, n, fill = direction)) +
   scale_x_discrete(labels = filter_labels) +
   labs(x = NULL, y = "DEG 5'UTRs (n)",
        title = "DEG 5'UTRs per metaprofile panel",
-       subtitle = "All DEGs = no-G4 filter; G4+ (pooled) = parallel+antiparallel+hybrid") +
+       subtitle = paste("All DEGs = no-G4 filter; G4+ (pooled) = parallel+antiparallel+hybrid;",
+                        "counted before the min-n profiling guard")) +
   theme_pub() + theme(legend.position = "bottom",
                       axis.text.x = element_text(angle = 30, hjust = 1))
 save_plot(p_counts, "deg_5utr_counts", "10_metaprofiles", fig_root, width = 11, height = 7)
 
-message("Done. DEG-5'UTR meta-profiles (fragment + gene). 5'UTRs per (unit, ko, topology, direction):")
-print(profiles %>% dplyr::distinct(unit, ko, topology, direction, n_5utr) %>%
-        dplyr::arrange(unit, ko, topology, direction))
+message("Done. DEG-5'UTR meta-profiles (fragment + gene). 5'UTRs per (unit, ko, filter, direction):")
+print(counts %>% dplyr::arrange(unit, ko, filter, direction))
+skipped <- counts %>% dplyr::filter(n < min_regions)
+if (nrow(skipped) > 0) {
+  message("Strata below min_regions_per_panel = ", min_regions,
+          " (facet shown empty, no curve drawn):")
+  print(skipped)
+}

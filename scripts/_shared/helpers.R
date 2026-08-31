@@ -88,6 +88,38 @@ topology_group_labels <- function(keep_groups) {
   lab
 }
 
+# v1.1: grid figures now annotate every panel with the n behind it. Removing the
+# back-fill left some topology strata with a handful of regions, and a curve drawn
+# from n = 10 is otherwise indistinguishable from one drawn from n = 216.
+#
+# Returns one row per facet combination with an "up N / down M" label, ready for
+# geom_text(aes(x = -Inf, y = Inf, label = label), inherit.aes = FALSE). Rules 31
+# and 32 each carried a near-identical local panel_counts(); this replaces both.
+panel_n_labels <- function(df, facet_cols, n_col, dir_col = "direction") {
+  keep <- unique(as.data.frame(df)[, c(facet_cols, dir_col, n_col), drop = FALSE])
+  # Each (facet, direction) must carry ONE n. Otherwise the merge below becomes a
+  # many-to-many join and silently invents labels -- e.g. passing a multi-topology
+  # frame but faceting on column alone yields every up-n crossed with every down-n.
+  if (anyDuplicated(keep[, c(facet_cols, dir_col), drop = FALSE]))
+    stop("panel_n_labels(): ", n_col, " is not unique per (",
+         paste(c(facet_cols, dir_col), collapse = ", "),
+         "). Aggregate before calling.")
+  side <- function(d) {
+    s <- keep[as.character(keep[[dir_col]]) == d, c(facet_cols, n_col), drop = FALSE]
+    names(s)[names(s) == n_col] <- paste0("n_", d)
+    s
+  }
+  m <- merge(side("up"), side("down"), by = facet_cols, all = TRUE)
+  m$label <- sprintf("up %s / down %s",
+                     ifelse(is.na(m$n_up),   "0", as.character(m$n_up)),
+                     ifelse(is.na(m$n_down), "0", as.character(m$n_down)))
+  # merge() drops factor levels; restore them or the labels land on the wrong facet.
+  for (fc in facet_cols)
+    if (is.factor(df[[fc]]))
+      m[[fc]] <- factor(as.character(m[[fc]]), levels = levels(df[[fc]]))
+  m
+}
+
 # ---------------------------------------------------------------------------
 # Config + path helpers
 # ---------------------------------------------------------------------------
@@ -331,6 +363,31 @@ annotate_peak_regions <- function(peaks, region_list, intergenic_label = "interg
 
 build_bw_meta <- function(bigwig_dir, genotypes = main_genotypes, assay = NULL) {
   bw_files <- list.files(bigwig_dir, pattern = "\\.bw$", full.names = TRUE)
+  # Fail fast on a bigWig directory that is missing or holds no .bw at all.
+  #
+  # Without this the pipeline does not stop -- it proceeds on an empty file set
+  # and dies much later somewhere unrelated. Observed on 2026-08-10: rule 11
+  # sampled 500,000 genome windows, CACHED an all-empty signal matrix, and only
+  # then failed inside tidyr::pivot_longer with "`cols` must select at least one
+  # column"; rule 07 reported "BigWig metadata (0 files)" and failed with "no
+  # function to return from". Neither message names the real problem, and rule
+  # 11 left a corrupt cache behind.
+  #
+  # Note this checks the DIRECTORY, not the filtered result: a legitimate call
+  # can return zero rows after filtering on genotype/assay, and that is fine.
+  if (length(bw_files) == 0) {
+    stop("No .bw files found in bigwig_dir: '", bigwig_dir, "'\n",
+         if (!dir.exists(bigwig_dir))
+           "  The directory does not exist.\n"
+         else
+           "  The directory exists but contains no .bw files.\n",
+         "  Fix paths.bigwig_dir in the config, or fetch the data with\n",
+         "  scripts/download_data.ps1 (Windows) / download_data.sh.\n",
+         "  To run against bigWigs you already have elsewhere, copy\n",
+         "  config/config.local.example.yaml to config/config.local.yaml, set the\n",
+         "  paths, and pass --configfile config/config.local.yaml to snakemake.",
+         call. = FALSE)
+  }
   meta <- data.frame(filepath = bw_files, filename = basename(bw_files),
                      stringsAsFactors = FALSE) %>%
     dplyr::mutate(
