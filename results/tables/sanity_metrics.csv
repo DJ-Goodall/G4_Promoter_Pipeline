@@ -1,8 +1,8 @@
 metric,value
-auroc_peak_vs_background,0.563201313603851
-median_prob_peak,0.08818329870700836
-median_prob_background,0.060619598254561424
-n_peaks,147495
-n_background,20000
-spearman_prob_vs_maxz_SUPPL,0.13105130764809259
-spearman_prob_vs_meansignal_SUPPL,0.12753684877304156
+auroc_peak_vs_background,0.5905720629825125
+median_prob_peak,0.11760526522994041
+median_prob_background,0.06915335357189178
+n_peaks,62762
+n_background,19990
+spearman_prob_vs_maxz_SUPPL,0.06538205548748904
+spearman_prob_vs_meansignal_SUPPL,0.0644219990997238

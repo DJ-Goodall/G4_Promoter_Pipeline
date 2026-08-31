@@ -1,8 +1,10 @@
 level,topology,n,pct
-Per motif (all PQS),antiparallel,87512,12.770086780905574
-Per motif (all PQS),hybrid,83481,12.181867795922596
-Per motif (all PQS),parallel,514296,75.04804542317183
-Per peak (top PQS),antiparallel,12098,8.183004944434298
-Per peak (top PQS),hybrid,14429,9.759677495721814
-Per peak (top PQS),no_canonical_PQS,16980,11.485156551206348
-Per peak (top PQS),parallel,104336,70.57216100863754
+Per motif (all PQS),antiparallel,24519,5.510890746405526
+Per motif (all PQS),hybrid,3979,0.894320089724197
+Per motif (all PQS),mixed,103267,23.21029221049225
+Per motif (all PQS),parallel,313154,70.38449695337803
+Per peak (top PQS),antiparallel,1322,2.1013145136935134
+Per peak (top PQS),hybrid,1010,1.6053915724889927
+Per peak (top PQS),mixed,13570,21.569468949183793
+Per peak (top PQS),no_canonical_PQS,2405,3.8227393384515125
+Per peak (top PQS),parallel,44606,70.9010856261822
