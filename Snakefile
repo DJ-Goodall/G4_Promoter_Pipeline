@@ -159,6 +159,11 @@ rule all:
         "results/figures/22_strand/strand_bias_comprehensive.pdf",
         "results/figures/22_strand/metaprofile_by_strand.pdf",
         "results/figures/23_gviz/.done",
+        # Stage M — TSS metaprofiles by RNA-seq expression quartile (rules 50-51).
+        # Listed here so the pair can never be orphaned from the DAG the way rule
+        # 46 was; target the rules by name to run only them.
+        "results/figures/24_expression_metaprofiles/tss_signal_by_expression.pdf",
+        "results/figures/24_expression_metaprofiles/tss_signal_by_expression_topology.pdf",
 
 
 # ===========================================================================
@@ -776,3 +781,52 @@ rule gviz_locus_tracks:
     output: touch("results/figures/23_gviz/.done")
     log: "logs/49_gviz_locus_tracks.log"
     shell: "Rscript scripts/49_gviz_locus_tracks.R {CONFIG} > {log} 2>&1"
+
+
+# ===========================================================================
+# Stage M — TSS metaprofiles by RNA-seq expression quartile (rules 50-51)
+# ===========================================================================
+# Rule 50 owns the ONLY bigWig pass of the pair: one replicate-averaged
+# (promoter x bin) matrix per genotype over ALL promoters, cached below. Every
+# expression stratum is a row subset of that matrix, so adding a stratum costs no
+# I/O. Rule 51 reads the cache and declares NO bigWig input — if it ever grows
+# one, the split has been broken.
+#
+# The cache name carries assay + half_width + n_bins, so changing any of those
+# config keys yields a different file rather than silently reusing a stale matrix
+# (cache/cooc_prof_*.rds from rule 40 encodes none of them, and does exactly that).
+EXPR_CACHE = "cache/tss_expr_repmean_{a}_hw{h}_b{b}.rds".format(
+    a=config["assay"],
+    h=config["metaprofile"]["half_width"],
+    b=config["metaprofile"]["n_bins"])
+
+rule tss_expression_metaprofiles:
+    input: promoters = config["paths"]["promoters_rds"], rld = "cache/rld.rds",
+           sinfo = "cache/sample_info.rds", gmeta = "cache/gene_meta.rds",
+           counts = COUNTS, bw = G4_BW
+    output:
+        repmean = EXPR_CACHE,
+        groups = "results/tables/tss_expression_gene_groups.csv",
+        counts_csv = "results/tables/tss_expression_counts.csv",
+        migration = "results/tables/tss_expression_quartile_migration.csv",
+        profiles = "results/tables/tss_expression_profiles.csv",
+        shape = "results/tables/tss_expression_shape_stats.csv",
+        fig = "results/figures/24_expression_metaprofiles/tss_signal_by_expression.pdf",
+        fig_shape = "results/figures/24_expression_metaprofiles/tss_signal_by_expression_shape.pdf",
+        fig_fixed = "results/figures/24_expression_metaprofiles/tss_signal_by_expression_fixedcuts.pdf",
+        fig_n = "results/figures/24_expression_metaprofiles/tss_expression_group_sizes.pdf",
+    log: "logs/50_tss_expression_metaprofiles.log"
+    shell: "Rscript scripts/50_tss_expression_metaprofiles.R {CONFIG} > {log} 2>&1"
+
+rule tss_expression_topology_metaprofiles:
+    input: repmean = EXPR_CACHE,
+           groups = "results/tables/tss_expression_gene_groups.csv",
+           peaks = "cache/peaks.rds", topo = "results/tables/peak_topology.csv"
+    output:
+        profiles = "results/tables/tss_expression_topology_profiles.csv",
+        counts_csv = "results/tables/tss_expression_topology_counts.csv",
+        shape = "results/tables/tss_expression_topology_shape_stats.csv",
+        fig = "results/figures/24_expression_metaprofiles/tss_signal_by_expression_topology.pdf",
+        fig_shape = "results/figures/24_expression_metaprofiles/tss_signal_by_expression_topology_shape.pdf",
+    log: "logs/51_tss_expression_topology_metaprofiles.log"
+    shell: "Rscript scripts/51_tss_expression_topology_metaprofiles.R {CONFIG} > {log} 2>&1"

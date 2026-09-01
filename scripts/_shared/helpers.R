@@ -344,6 +344,95 @@ mean_replicate_profile <- function(regions, bw_filepaths, n_bins = 100, half_wid
 }
 
 # ---------------------------------------------------------------------------
+# Replicate-averaged profile MATRIX, and profiles derived from it by row subset.
+#
+# mean_replicate_profile() above re-reads every bigWig for every region set it is
+# handed. Rules 24/30/31/32 get away with that because their strata partition a
+# few thousand regions. A rule that stratifies ALL ~24k promoters five ways per
+# genotype (rules 50/51) would re-read the same 12 files five times over for no
+# new I/O, so it splits the work instead: rep_mean_matrix() does the read ONCE
+# per genotype over ALL regions, and profile_from_rep_mean() then derives any
+# stratum by subsetting rows.
+#
+# The two together are mean_replicate_profile() cut at its own line 339, so a
+# subset reproduces it EXACTLY (bit-identical, not all.equal): colMeans() and
+# sd/sqrt(n) are per-column reductions over rows, so subsetting before or after
+# is the same arithmetic in the same order.
+#
+# That holds only if every region has the SAME WIDTH. compute_profile_matrix()
+# rbinds the per-chromosome Views (line 303) and RECYCLES unequal ones, making
+# `w` -- and therefore the binning grid and the short rows' contents -- depend on
+# which OTHER regions share that chromosome. rep_mean_matrix() refuses unequal
+# widths rather than letting a cached matrix silently diverge; callers must drop
+# edge-clamped windows first.
+#
+# NB rule 40's local group_profile() (40_g4_rloop_cooccurrence.R:224) is the same
+# idea with sqrt(sum(is.finite(z))); this uses sqrt(sum(!is.na(x))) to match
+# mean_replicate_profile() at line 341 exactly (they differ only on +/-Inf).
+# Folding rule 40 onto this helper is a separate change.
+# ---------------------------------------------------------------------------
+rep_mean_matrix <- function(regions, bw_filepaths, n_bins = 100, half_width = 2000) {
+  stopifnot(length(bw_filepaths) > 0, length(regions) > 0)
+  w <- unique(GenomicRanges::width(regions))
+  if (length(w) != 1L)
+    stop("rep_mean_matrix(): all regions must have the same width (got ",
+         paste(range(w), collapse = "-"), "). compute_profile_matrix() recycles ",
+         "unequal Views (helpers.R:303); drop edge-clamped windows first.")
+  profs <- lapply(bw_filepaths, function(fp)
+    compute_profile_matrix(regions, fp, n_bins = n_bins, half_width = half_width))
+  arr <- simplify2array(lapply(profs, `[[`, "bin_mat"))
+  # Single-replicate genotypes come back 2-D; same branch as line 334.
+  rep_mean <- if (length(dim(arr)) == 3) apply(arr, c(1, 2), mean, na.rm = TRUE) else arr
+  rep_mean[is.nan(rep_mean)] <- NA_real_          # line 339, kept verbatim
+  dimnames(rep_mean) <- list(names(regions), NULL)
+  attr(rep_mean, "positions") <- profs[[1]]$positions
+  rep_mean
+}
+
+# (rep_mean, rows) -> data.frame(bin, position, mean, sem, n_regions).
+# `rows` may be integer, logical or character (matched against rownames).
+# Returns NULL for an empty selection so callers can drop the stratum rather than
+# emitting a row of NaN that plots as an invisible gap.
+profile_from_rep_mean <- function(rep_mean, rows = NULL, positions = NULL,
+                                  half_width = 2000) {
+  if (is.null(positions)) positions <- attr(rep_mean, "positions")
+  if (!is.null(rows)) {
+    if (is.character(rows)) {
+      ix <- match(rows, rownames(rep_mean))
+      if (anyNA(ix))
+        stop("profile_from_rep_mean(): ", sum(is.na(ix)),
+             " row name(s) not present in the matrix.")
+      rows <- ix
+    }
+    rep_mean <- rep_mean[rows, , drop = FALSE]
+  }
+  if (nrow(rep_mean) == 0L) return(NULL)
+  n_bins <- ncol(rep_mean)
+  if (is.null(positions)) positions <- seq(-half_width, half_width, length.out = n_bins)
+  stopifnot(length(positions) == n_bins)
+  data.frame(bin       = seq_len(n_bins),
+             position  = positions,
+             mean      = colMeans(rep_mean, na.rm = TRUE),
+             sem       = apply(rep_mean, 2, function(x)
+                                 stats::sd(x, na.rm = TRUE) / sqrt(sum(!is.na(x)))),
+             n_regions = nrow(rep_mean),
+             row.names = NULL)
+}
+
+# Per-curve shape summary: WHERE the signal sits, as numbers rather than a
+# picture. At hw2000/b80 the bin step is 50.6 bp, so peak_position differences
+# below that are not resolvable -- centre_of_mass is, which is why both are here.
+profile_shape_stats <- function(df) {
+  m <- pmax(df$mean, 0); m[!is.finite(m)] <- 0
+  tot <- sum(m)
+  data.frame(
+    peak_position   = if (tot > 0) df$position[which.max(m)] else NA_real_,
+    centre_of_mass  = if (tot > 0) sum(df$position * m) / tot else NA_real_,
+    frac_downstream = if (tot > 0) sum(m[df$position > 0]) / tot else NA_real_,
+    window_mean     = mean(df$mean, na.rm = TRUE))
+}
+
+# ---------------------------------------------------------------------------
 # Peak annotation + bigWig metadata (from V3)
 # ---------------------------------------------------------------------------
 annotate_peak_regions <- function(peaks, region_list, intergenic_label = "intergenic") {

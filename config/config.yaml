@@ -255,6 +255,59 @@ metaprofile:
   deg_fixed_ymax: 28
   deg_5utr_grid_ymax: 40
 
+  # ---- Rules 50/51: TSS metaprofiles by RNA-seq expression quartile --------
+  # Window and binning are INHERITED from metaprofile.half_width (2000) and
+  # metaprofile.n_bins (80) above, so these figures sit on the same grid as
+  # rules 24/30/31 and the profile cache filename tracks those two keys.
+  expr_n_quantiles: 4            # 4 -> Q1..Q4. Every label/colour follows.
+  expr_per_genotype: true        # true : each genotype's own 3 rlog replicates
+                                 #        define its own cuts. Genes move between
+                                 #        quartiles across panels -- intentional,
+                                 #        and bounded: measured 2026-09-01, 94.5%
+                                 #        (WT vs dKO) / 95.3% (WT vs DHX36KO) of
+                                 #        genes keep their quartile, and the
+                                 #        cross-tab is strictly tridiagonal, so
+                                 #        every mover moves exactly one quartile.
+                                 # false: ref_genotype cuts applied to all panels.
+  expr_fixed_cuts_arm: true      # ALSO render the expr_per_genotype = false arm
+                                 # as a sensitivity figure. Costs no bigWig I/O
+                                 # (another row subset of the same cache) and is
+                                 # what separates a real KO positional shift from
+                                 # a quartile-relabelling artefact.
+  expr_quantile_basis: matched   # "matched": cuts from the 15096 DESeq2 genes
+                                 #   that HAVE a promoter -> 3774 per quartile,
+                                 #   so all four curves carry the same n.
+                                 # "all": cuts from all 16981, then subset ->
+                                 #   3101 / 3819 / 4068 / 4108.
+  expr_include_silent: true      # 5th curve: promoters whose gene IS in the raw
+                                 # count table but was dropped by rnaseq.min_count
+                                 # (rowSums over all 12 libraries < 10). n = 5595.
+  expr_silent_from_counts: true  # read rnaseq.count_table to separate "truly
+                                 # silent" (5595) from "symbol absent from the
+                                 # RNA-seq vocabulary" (3773, expression UNKNOWN
+                                 # -> dropped and counted, never merged into
+                                 # silent: a curve that is 40% unknown cannot
+                                 # support a positional claim). If the file is
+                                 # unreadable the silent group is dropped with a
+                                 # warning rather than being widened.
+  expr_shape_normalise: true     # companion figure: each curve / its own mean
+                                 # across the window, isolating POSITION from
+                                 # amplitude (expression correlates with open
+                                 # chromatin, so amplitude ordering is expected).
+  expr_silent_linetype: "22"     # dashed, so "silent" is not misread as a 5th
+                                 # quantile of the same continuum. "solid" to off.
+  expr_min_regions_per_panel: 20 # curves below this n are not drawn; the panel
+                                 # still appears (drop = FALSE) with its n, so
+                                 # "no data" reads differently from "no signal".
+                                 # Bites only rule 51 (antiparallel = 68 and
+                                 # no_canonical_PQS = 56 promoters in TOTAL).
+  expr_verify_equivalence: true  # rule 50 re-profiles one 400-region sample via
+                                 # mean_replicate_profile() while the bigWigs are
+                                 # still hot and asserts the cached path
+                                 # reproduces it at tolerance 0 (~15 s/genotype).
+  expr_rebuild_cache: false      # true forces the ~30 min bigWig pass even when
+                                 # the cache exists and validates.
+
 # ---- All-PQS / multi-G4 motif analysis (DeepG4 rules 27-32) ---------------
 motif_analysis:
   min_score: 20
