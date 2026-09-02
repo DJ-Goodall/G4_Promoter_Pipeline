@@ -296,6 +296,16 @@ metaprofile:
                                  # chromatin, so amplitude ordering is expected).
   expr_silent_linetype: "22"     # dashed, so "silent" is not misread as a 5th
                                  # quantile of the same continuum. "solid" to off.
+  # Quartile ramp: blue = least active -> red = most active. Interpolated to
+  # expr_n_quantiles, so these 4 anchors ARE the colours at the default n = 4.
+  # Deliberately jumps the pale centre a standard diverging palette passes
+  # through (RdBu's #F7F7F7 neighbours): every quartile stays saturated enough
+  # to read on a poster, which the viridis original's yellow/light-green did not.
+  expr_palette: ["#2166AC", "#4393C3", "#D6604D", "#B2182B"]
+  expr_silent_colour: "grey55"   # OFF the ramp on purpose: "silent" is the
+                                 # no-expression floor, not a fifth quantile of
+                                 # the same continuum (hence also the dashed
+                                 # line). Set to a blue to fold it into the ramp.
   expr_min_regions_per_panel: 20 # curves below this n are not drawn; the panel
                                  # still appears (drop = FALSE) with its n, so
                                  # "no data" reads differently from "no signal".

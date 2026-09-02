@@ -311,6 +311,14 @@ sem_note <- paste("ribbon = SEM across promoters (promoter-to-promoter spread),"
                   "NOT a test of the quartile or genotype difference")
 lty_vals <- c(setNames(rep("solid", n_q), q_levels),
               silent = as.character(mp$expr_silent_linetype %||% "22"))
+# Blue (least active) -> red (most active), interpolated to n_q. "silent" sits
+# off the ramp in grey: it is the no-expression floor, not a fifth quantile, and
+# a blue there would compete with Q1 for the darkest end of the scale.
+expr_cols <- c(
+  setNames(grDevices::colorRampPalette(
+    as.character(unlist(mp$expr_palette %||%
+      c("#2166AC", "#4393C3", "#D6604D", "#B2182B"))))(n_q), q_levels),
+  silent = as.character(mp$expr_silent_colour %||% "grey55"))
 
 build_expr_fig <- function(df, ycol, semcol, fname, title, subtitle, height = 7) {
   # panel_n_labels() is hard-wired to a two-level up/down direction column and
@@ -329,8 +337,8 @@ build_expr_fig <- function(df, ycol, semcol, fname, title, subtitle, height = 7)
     geom_text(data = n_lab, aes(x = -Inf, y = Inf, label = label), inherit.aes = FALSE,
               hjust = -0.03, vjust = 1.4, size = 2.4, colour = "grey25") +
     facet_wrap(~ genotype, scales = "free_y", nrow = 2) +
-    scale_colour_viridis_d(end = 0.92, name = "Expression", drop = FALSE) +
-    scale_fill_viridis_d(end = 0.92, guide = "none", drop = FALSE) +
+    scale_colour_manual(values = expr_cols, name = "Expression", drop = FALSE) +
+    scale_fill_manual(values = expr_cols, guide = "none", drop = FALSE) +
     scale_linetype_manual(values = lty_vals, guide = "none", drop = FALSE) +
     labs(x = "Distance to TSS (bp)", y = NULL, title = title, subtitle = subtitle) +
     theme_pub() + theme(legend.position = "bottom")
@@ -362,7 +370,7 @@ p_n <- ggplot(counts %>% dplyr::filter(arm == "per_genotype"),
   geom_text(aes(label = format(n_promoters, big.mark = ",", trim = TRUE)),
             vjust = -0.3, size = 2.6) +
   facet_wrap(~ genotype, nrow = 1) +
-  scale_fill_viridis_d(end = 0.92, guide = "none", drop = FALSE) +
+  scale_fill_manual(values = expr_cols, guide = "none", drop = FALSE) +
   labs(x = NULL, y = "Promoters (n)",
        title = "Promoters per expression group",
        subtitle = sprintf(paste("Excluded and reported separately: %d without a SYMBOL,",

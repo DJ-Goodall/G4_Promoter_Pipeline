@@ -156,6 +156,13 @@ readr::write_csv(shape_stats, "results/tables/tss_expression_topology_shape_stat
 # n=68), so each needs its own scale.
 lty_vals <- c(setNames(rep("solid", n_q), paste0("Q", seq_len(n_q))),
               silent = as.character(mp$expr_silent_linetype %||% "22"))
+# Same ramp as rule 50, from the same config keys, so the two figures are read
+# with one legend: blue = least active -> red = most active, "silent" off-ramp.
+expr_cols <- c(
+  setNames(grDevices::colorRampPalette(
+    as.character(unlist(mp$expr_palette %||%
+      c("#2166AC", "#4393C3", "#D6604D", "#B2182B"))))(n_q), paste0("Q", seq_len(n_q))),
+  silent = as.character(mp$expr_silent_colour %||% "grey55"))
 n_lab <- counts %>%
   dplyr::group_by(genotype, topology) %>%
   dplyr::summarise(label = paste0("n = ", paste(n_promoters, collapse = "/")), .groups = "drop")
@@ -171,8 +178,8 @@ build_topo_fig <- function(ycol, semcol, fname, title, subtitle) {
     facet_wrap(~ genotype + topology, scales = "free_y", drop = FALSE,
                ncol = length(keep_groups),
                labeller = labeller(topology = topo_labs)) +
-    scale_colour_viridis_d(end = 0.92, name = "Expression", drop = FALSE) +
-    scale_fill_viridis_d(end = 0.92, guide = "none", drop = FALSE) +
+    scale_colour_manual(values = expr_cols, name = "Expression", drop = FALSE) +
+    scale_fill_manual(values = expr_cols, guide = "none", drop = FALSE) +
     scale_linetype_manual(values = lty_vals, guide = "none", drop = FALSE) +
     labs(x = "Distance to TSS (bp)", y = NULL, title = title, subtitle = subtitle) +
     theme_pub() + theme(legend.position = "bottom")
