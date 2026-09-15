@@ -96,6 +96,13 @@ external/
 !/results/tables/unclassified_repeat_enrichment.csv
 !/results/tables/volcano_label_genes.csv
 
+# --- Agent / assistant context --------------------------------------------
+# Operating notes for Claude Code: environment quirks, machine-specific paths
+# and working preferences. Deliberately untracked -- it describes how THIS
+# machine runs the workflow, which is exactly what config.local.yaml is kept
+# out of the repo for. README.md remains the shared, tracked documentation.
+CLAUDE.md
+
 # --- Language / editor cruft ----------------------------------------------
 .Rhistory
 .RData
