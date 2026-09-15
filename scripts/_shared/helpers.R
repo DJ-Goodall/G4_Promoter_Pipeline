@@ -433,6 +433,287 @@ profile_shape_stats <- function(df) {
 }
 
 # ---------------------------------------------------------------------------
+# SCALED-REGION profiles: 1 kb flank | gene body compressed to fixed bins | 1 kb
+# flank. The deepTools `computeMatrix scale-regions` layout, for rules 52/53.
+#
+# Why this cannot reuse compute_profile_matrix(). That function bins a
+# FIXED-WIDTH window, and its whole binning grid is derived from one shared
+# `w <- ncol(sig_matrix)` (line 303-304) -- which is exactly the recycling trap
+# rep_mean_matrix() guards against. Gene bodies here span 1 kb to 35.8 Mb
+# (measured on the 24,483 promoter genes: median 15.8 kb, 5th pct 193 bp, max
+# Mir3084-2 at 35,832,227 bp, an annotation span over scattered miRNA copies
+# rather than a real transcription unit). Equal widths are impossible by
+# construction, so the body is binned PER GENE instead.
+#
+# It is also a different algorithm, not just a different grid. compute_profile_
+# matrix() materialises every window with as.numeric() and rbinds them -- for
+# rule 50 that is 24,464 x 4000 doubles per chromosome pass. Here the span is
+# ~1.3 Gb per bigWig (13x rule 50), so materialising is not an option: bins are
+# built as explicit ranges and reduced with viewMeans(), which works on the Rle
+# run structure and never expands it. Cost therefore scales with the number of
+# RUNS touched, not with base pairs.
+#
+# COORDINATES. `positions` is in gene-fraction units, not bp, because bp is not
+# a shared axis once bodies are scaled:
+#       -1 = TSS - flank      0 = TSS      1 = TES      2 = TES + flank
+# so the flanks are in units of `flank` and the body in units of gene length.
+# A body bin is width/n_body_bins bp, which is 17 bp at the 1 kb minimum and
+# 3.4 kb at the 95th percentile -- the x-axis is NOT linear in bp and no
+# distance may be read off it. That is the price of putting TSS and TES at
+# fixed positions for every gene.
+# ---------------------------------------------------------------------------
+scaled_positions <- function(flank = 1000L, n_flank_bins = 20L, n_body_bins = 60L) {
+  c(-1 + (seq_len(n_flank_bins) - 0.5) / n_flank_bins,
+         (seq_len(n_body_bins)  - 0.5) / n_body_bins,
+     1 + (seq_len(n_flank_bins) - 0.5) / n_flank_bins)
+}
+
+# Bin edges for every region, in GENOMIC left-to-right order (the strand flip
+# happens after the signal is read, exactly as compute_profile_matrix() does it
+# at line 314). Returns integer start/end vectors of length length(regions) *
+# n_bins, laid out bin-major so matrix(x, nrow = length(regions)) reassembles it.
+scaled_bin_ranges <- function(regions, flank = 1000L, n_flank_bins = 20L,
+                              n_body_bins = 60L) {
+  s <- as.numeric(GenomicRanges::start(regions))
+  e <- as.numeric(GenomicRanges::end(regions))
+  w <- e - s + 1
+  if (any(w < n_body_bins))
+    stop("scaled_bin_ranges(): ", sum(w < n_body_bins), " region(s) are shorter ",
+         "than n_body_bins (", n_body_bins, " bp), so a body bin would be empty. ",
+         "Filter on width first (metaprofile.expr_gene_min_length).")
+  fb <- flank / n_flank_bins
+  # Left edge of every bin, plus the one final right edge: n x (n_bins + 1).
+  edges <- cbind(
+    outer(s - flank, (seq_len(n_flank_bins) - 1) * fb, "+"),
+    s + outer(w / n_body_bins, seq_len(n_body_bins) - 1),
+    outer(e + 1,     (seq_len(n_flank_bins) - 1) * fb, "+"),
+    e + 1 + flank)
+  nb <- 2L * n_flank_bins + n_body_bins
+  st <- floor(edges[, seq_len(nb),      drop = FALSE])
+  en <- floor(edges[, seq_len(nb) + 1L, drop = FALSE]) - 1
+  # A scaled body bin can round to zero width on a short gene; never let a bin
+  # invert, or Views() silently returns a zero-length view and the mean is NaN.
+  en <- pmax(en, st)
+  list(start = as.integer(st), end = as.integer(en), n_bins = nb)
+}
+
+# One bigWig -> (region x bin) matrix on the scaled grid. The read loop, the
+# out-of-range policy and the strand flip now live in bin_matrix_from_ranges()
+# below, shared with the composite layout so the two cannot diverge.
+scaled_profile_matrix <- function(regions, bw_filepath, flank = 1000L,
+                                  n_flank_bins = 20L, n_body_bins = 60L)
+  bin_matrix_from_ranges(regions, bw_filepath,
+    scaled_bin_ranges(regions, flank, n_flank_bins, n_body_bins))
+
+# Replicate average of the above -- the scaled counterpart of rep_mean_matrix(),
+# and consumed by the same profile_from_rep_mean(). No equal-width guard here:
+# unequal widths are the POINT, and the per-gene binning makes each row
+# independent of which other genes share its chromosome (which is what the
+# equal-width guard buys on the fixed-width path).
+scaled_rep_mean_matrix <- function(regions, bw_filepaths, flank = 1000L,
+                                   n_flank_bins = 20L, n_body_bins = 60L) {
+  stopifnot(length(bw_filepaths) > 0, length(regions) > 0)
+  mats <- lapply(bw_filepaths, function(fp)
+    scaled_profile_matrix(regions, fp, flank, n_flank_bins, n_body_bins))
+  arr <- simplify2array(mats)
+  rep_mean <- if (length(dim(arr)) == 3) apply(arr, c(1, 2), mean, na.rm = TRUE) else arr
+  rep_mean[is.nan(rep_mean)] <- NA_real_
+  dimnames(rep_mean) <- list(names(regions), NULL)
+  attr(rep_mean, "positions") <- scaled_positions(flank, n_flank_bins, n_body_bins)
+  rep_mean
+}
+
+# ---------------------------------------------------------------------------
+# COMPOSITE (TSS-anchored | scaled interior | TES-anchored) gene profiles
+#
+# WHY THIS REPLACED THE PURE SCALED LAYOUT (scaled_* above), measured 2026-09-15.
+# The scaled layout put 50 bp flank bins next to body bins of MEDIAN 323 bp --
+# a 6.5x resolution step at exactly the TSS. That step, not biology, produced
+# the vertical cliff at the TSS in every Stage N figure:
+#
+#   rule 50, same genes, same bigWigs, 50 bp bins, no scaling:
+#     TSS -25 bp = 4.59   +25 bp = 4.53   +275 bp = 3.58   +530 bp = 2.95
+#   i.e. G4 signal carries ~500 bp PAST the TSS and decays smoothly.
+#
+#   the scaled layout reported that entire decay as two numbers, 3.67 and 2.96,
+#   and drew it as a vertical drop.
+#
+# Worse, a "body bin" is the gene's own length / n_body_bins, so it is a
+# DIFFERENT genomic distance for every gene: 32 bp at the 5th percentile,
+# 323 bp at the median, 3,352 bp at the 95th, 597 kb at the maximum. 37% of
+# genes had a first body bin wider than the 500 bp decay and 21% wider than
+# 1 kb, so for those the promoter-proximal shoulder was averaged into intronic
+# background BEFORE the group mean was taken. The median mm10 5'UTR is 161 bp;
+# 68.9% of genes had a first body bin wider than that. The 5'UTR had no
+# dedicated bin anywhere on the axis and could not be read off the figure.
+#
+# THE FIX: only the deep interior is scaled. Both anchors get a fixed-bp window
+# at a fixed bin size, so the TSS shoulder and the TES region are linear in bp
+# and directly comparable to rule 50's figure (same +/-2 kb, same 50 bp bins).
+#
+#   [ TSS - W .. TSS + W ]  [ interior, scaled ]  [ TES - W .. TES + W ]
+#     2W/anchor_bin bins       n_body_bins           2W/anchor_bin bins
+#         REAL bp                 NOT bp                  REAL bp
+#
+# Cost: a gene needs width >= 2W + min_interior for the blocks not to overlap,
+# so the short genes leave the set. At W = 2000 that is 18,219 of 21,946 (83%),
+# and the loss is NOT uniform across expression groups (silent -24.2%, Q3
+# -8.3%), because silent genes are shorter -- script 52 reports this per group
+# rather than letting it quietly reweight the curves.
+#
+# PLOT COORDINATES. `x` is a single continuous axis so one ggplot geom_line can
+# cross all three blocks, but it is only bp WITHIN a block:
+#       -W = TSS - W      0 = TSS      +W = TSS + W
+#                      [ interior occupies W .. 3W of plot space ]
+#      3W = TES - W     4W = TES      5W = TES + W
+# The interior is given 2W of plot width so it reads as one block of the same
+# size as each anchor, not because 2W bp of anything is in there.
+# ---------------------------------------------------------------------------
+
+# Bin centres + the block each bin belongs to. `bp` is the real offset from the
+# block's anchor and is NA across the interior, which is the machine-readable
+# form of "no distance may be read off this stretch".
+composite_positions <- function(anchor_window = 2000L, anchor_bin = 50L,
+                                n_body_bins = 60L) {
+  W  <- as.numeric(anchor_window)
+  na <- as.integer(2 * W / anchor_bin)
+  if (!isTRUE(all.equal(2 * W / anchor_bin, as.numeric(na))))
+    stop("composite_positions(): 2 * anchor_window (", 2 * W, ") is not a whole ",
+         "number of anchor_bin (", anchor_bin, ") bins.")
+  bp_a <- -W + (seq_len(na) - 0.5) * anchor_bin
+  frac <- (seq_len(n_body_bins) - 0.5) / n_body_bins
+  data.frame(
+    bin   = seq_len(2L * na + n_body_bins),
+    x     = c(bp_a, W + frac * 2 * W, 4 * W + bp_a),
+    block = factor(rep(c("tss", "interior", "tes"), c(na, n_body_bins, na)),
+                   levels = c("tss", "interior", "tes")),
+    bp    = c(bp_a, rep(NA_real_, n_body_bins), bp_a),
+    frac  = c(rep(NA_real_, na), frac, rep(NA_real_, na)),
+    stringsAsFactors = FALSE)
+}
+
+# Axis furniture for the composite x. Returned rather than hard-coded in the
+# scripts so rules 52 and 53 cannot drift apart on where "TES" is drawn.
+composite_axis <- function(anchor_window = 2000L) {
+  W <- as.numeric(anchor_window)
+  # Signed, because each anchor block has a -W and a +W edge and an unsigned
+  # "2 kb" at both ends of the figure reads as the same place.
+  kb <- function(v) sprintf("%s%s kb", if (v > 0) "+" else "-",
+                            format(abs(v) / 1000, trim = TRUE))
+  list(breaks    = c(-W, 0, W, 2 * W, 3 * W, 4 * W, 5 * W),
+       labels    = c(kb(-W), "TSS", kb(W), "interior\n(scaled)", kb(-W), "TES", kb(W)),
+       anchors   = c(0, 4 * W),          # dashed: the TSS and the TES
+       dividers  = c(W, 3 * W),          # solid:  where bp stops/resumes meaning
+       interior  = c(W, 3 * W),          # shaded span
+       limits    = c(-W, 5 * W))
+}
+
+# Bin edges for every region in GENOMIC left-to-right order; the strand flip
+# happens after the signal is read, exactly as compute_profile_matrix():314 and
+# scaled_bin_ranges() do it. Reversing a row maps the left anchor block onto the
+# right one, which is only correct because both blocks have the same bin count
+# -- that is why there is a single anchor_window rather than one per end.
+composite_bin_ranges <- function(regions, anchor_window = 2000L, anchor_bin = 50L,
+                                 n_body_bins = 60L, min_interior = 1000L) {
+  W  <- as.numeric(anchor_window)
+  ab <- as.numeric(anchor_bin)
+  na <- as.integer(2 * W / ab)
+  s  <- as.numeric(GenomicRanges::start(regions))
+  e  <- as.numeric(GenomicRanges::end(regions))
+  interior <- (e - W) - (s + W) + 1
+  if (any(interior < min_interior))
+    stop("composite_bin_ranges(): ", sum(interior < min_interior), " region(s) leave ",
+         "less than min_interior (", min_interior, " bp) between the two ",
+         anchor_window, " bp anchor windows. Filter on width first ",
+         "(metaprofile.expr_gene_min_length must be >= ", 2 * W + min_interior, ").")
+  if (any(interior < n_body_bins))
+    stop("composite_bin_ranges(): ", sum(interior < n_body_bins), " region(s) have an ",
+         "interior shorter than n_body_bins (", n_body_bins, " bp), so an interior ",
+         "bin would be empty.")
+  # Left edge of every bin, plus the single final right edge: n x (n_bins + 1).
+  # Blocks tile [s-W, s+W-1], [s+W, e-W], [e-W+1, e+W] with no overlap and no gap.
+  edges <- cbind(
+    outer(s - W,     (seq_len(na) - 1) * ab, "+"),
+    s + W + outer(interior / n_body_bins, seq_len(n_body_bins) - 1),
+    outer(e - W + 1, (seq_len(na) - 1) * ab, "+"),
+    e + W + 1)
+  nb <- 2L * na + n_body_bins
+  st <- floor(edges[, seq_len(nb),      drop = FALSE])
+  en <- floor(edges[, seq_len(nb) + 1L, drop = FALSE]) - 1
+  en <- pmax(en, st)   # never let a rounded interior bin invert into a NaN view
+  list(start = as.integer(st), end = as.integer(en), n_bins = nb, n_anchor_bins = na)
+}
+
+# Shared reader for every per-region binning scheme (scaled_* and composite_*).
+# Split out so the out-of-range policy and the strand flip exist once: both
+# layouts must treat a bigWig that ends before the chromosome does the same way,
+# and a divergence there would be invisible in the figures.
+bin_matrix_from_ranges <- function(regions, bw_filepath, gr) {
+  cov <- read_bigwig_rle(bw_filepath)
+  nb  <- gr$n_bins
+  n   <- length(regions)
+  bin_mat <- matrix(NA_real_, nrow = n, ncol = nb)
+  n_oob <- 0L
+  chrs <- as.character(GenomicRanges::seqnames(regions))
+  for (chr in intersect(unique(chrs), names(cov))) {
+    ci <- which(chrs == chr)
+    if (!length(ci)) next
+    chr_len <- length(cov[[chr]])
+    # `idx` walks the n x nb layout column-major, which is how the *_bin_ranges
+    # functions laid it out.
+    idx <- as.vector(outer(ci, (seq_len(nb) - 1L) * n, "+"))
+    st  <- gr$start[idx]; en <- gr$end[idx]
+    # A bigWig's Rle can be SHORTER than the BSgenome chromosome -- measured on
+    # GSM8305989 chr16, coverage ends at 98,008,968 against a BSgenome length of
+    # 98,207,768, a 199 kb shortfall. Such bins stay NA rather than being
+    # clamped: clamping would shrink that gene's bin and silently rescale it
+    # against every other gene, the exact distortion per-gene binning avoids.
+    vm  <- rep(NA_real_, length(idx))
+    inb <- st >= 1L & en <= chr_len
+    if (any(inb))
+      vm[inb] <- IRanges::viewMeans(
+        IRanges::Views(cov[[chr]], start = st[inb], end = en[inb]), na.rm = TRUE)
+    n_oob <- n_oob + sum(!inb)
+    bin_mat[ci, ] <- matrix(vm, nrow = length(ci), ncol = nb)
+  }
+  if (n_oob > 0L)
+    message(sprintf("  %s: %d of %d bins (%.3f%%) lie past the end of the bigWig's ",
+                    basename(bw_filepath), n_oob, n * nb, 100 * n_oob / (n * nb)),
+            "coverage and are NA (not clamped).")
+  # Minus-strand genes are read right-to-left, so reversing the row puts the TSS
+  # on the left for every gene. Same operation as compute_profile_matrix():314.
+  minus <- as.character(GenomicRanges::strand(regions)) == "-"
+  if (any(minus)) bin_mat[minus, ] <- bin_mat[minus, seq(nb, 1L), drop = FALSE]
+  bin_mat[is.nan(bin_mat)] <- NA_real_
+  dimnames(bin_mat) <- list(names(regions), NULL)
+  bin_mat
+}
+
+composite_profile_matrix <- function(regions, bw_filepath, anchor_window = 2000L,
+                                     anchor_bin = 50L, n_body_bins = 60L,
+                                     min_interior = 1000L)
+  bin_matrix_from_ranges(regions, bw_filepath,
+    composite_bin_ranges(regions, anchor_window, anchor_bin, n_body_bins, min_interior))
+
+# Replicate average, consumed by the same profile_from_rep_mean() as every other
+# layout in the repo.
+composite_rep_mean_matrix <- function(regions, bw_filepaths, anchor_window = 2000L,
+                                      anchor_bin = 50L, n_body_bins = 60L,
+                                      min_interior = 1000L) {
+  stopifnot(length(bw_filepaths) > 0, length(regions) > 0)
+  mats <- lapply(bw_filepaths, function(fp)
+    composite_profile_matrix(regions, fp, anchor_window, anchor_bin, n_body_bins,
+                             min_interior))
+  arr <- simplify2array(mats)
+  rep_mean <- if (length(dim(arr)) == 3) apply(arr, c(1, 2), mean, na.rm = TRUE) else arr
+  rep_mean[is.nan(rep_mean)] <- NA_real_
+  dimnames(rep_mean) <- list(names(regions), NULL)
+  attr(rep_mean, "positions") <-
+    composite_positions(anchor_window, anchor_bin, n_body_bins)$x
+  rep_mean
+}
+
+# ---------------------------------------------------------------------------
 # Peak annotation + bigWig metadata (from V3)
 # ---------------------------------------------------------------------------
 annotate_peak_regions <- function(peaks, region_list, intergenic_label = "intergenic") {

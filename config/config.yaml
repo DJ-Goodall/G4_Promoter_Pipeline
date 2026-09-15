@@ -169,11 +169,53 @@ strand:
   region_types: [promoter, 5UTR]
   n_bins: 100                         # strand metaprofile bins
   half_width: 2000                    # strand metaprofile TSS +/-
+  # -- v1.2: mirrored, region-centred metaprofiles ---------------------------
+  # Replaces the three old metaprofile figures. Two things were wrong with them
+  # beyond the layout. (a) They were START-anchored: prof_matrix() built its
+  # window from start(peak) - half_width, so a 200 bp and a 2 kb peak were
+  # aligned by their left edge and the "centre" of the plot was not the G4.
+  # (b) SEM was taken across the 3 replicates (n = 3), which makes the ribbon a
+  # statement about library reproducibility, not about the region set.
+  # The replacement anchors on the REGION centre (= the TSS for promoters, the
+  # 5'UTR midpoint for 5'UTRs) via the shared helpers, so it sits on the same
+  # grid as rules 24/30/31, and derives every stratum by row-subsetting one
+  # replicate-averaged matrix per genotype (rep_mean_matrix()).
+  mirror_window_size: 250             # which G4Hunter window defines the call;
+                                      # must be one of window_sizes above
+  mirror_min_regions: 20              # curves below this n are recorded but not
+                                      # drawn (n is written before the guard, so
+                                      # a missing curve is explained not absent)
 
 # ---- Stage L: Gviz locus tracks (strand chunk s9-gviz-gene-loci) ----------
 gviz:
-  n_loci: 5
-  padding: 5000                       # bp each side of peak midpoint -> 10 kb view
+  # mode "genes" plots the curated list below; "peaks" restores the v1.0
+  # behaviour of sampling n_loci peaks by |G4Hunter score| quantile. Default is
+  # "genes" because the purpose of this figure is to show NAMED loci on a
+  # poster, and a score-ranked sample cannot be asked for a specific gene.
+  mode: genes
+  # mm10 SYMBOLS. Checked against org.Mm.eg.db and TxDb.Mmusculus.UCSC.mm10 on
+  # 2026-09-15: all ten resolve to exactly one Entrez id with a single-strand
+  # gene range. The list was supplied in human/colloquial nomenclature, which
+  # does NOT match what TxDb indexes -- these are the mouse orthologues:
+  #   KRAS  -> Kras    HRAS   -> Hras    BCL2   -> Bcl2   cKIT -> Kit
+  #   cMYC  -> Myc     VEGF   -> Vegfa   HIF1a  -> Hif1a  cMYB -> Myb
+  #   PDGF-A-> Pdgfa   hTERT  -> Tert
+  # Two are judgement calls worth recording: mouse has Vegfa/b/c/d and Vegfa is
+  # the canonical "VEGF"; TERT carries no species prefix in mouse. The script
+  # STOPS on a name it cannot resolve rather than writing a blank panel -- a
+  # silently empty locus track is the failure mode this list exists to avoid.
+  genes: [Kras, Hras, Bcl2, Kit, Myc, Vegfa, Hif1a, Pdgfa, Tert, Myb]
+  # Two views per gene, because no single window serves both purposes: the loci
+  # span 4.9 kb (Hras) to 176 kb (Bcl2), a 36x range.
+  #   tss   -- TSS +/- padding. Identical bp-per-inch for every gene, so peak
+  #            widths and heights ARE comparable across genes; the TES is off
+  #            screen for all but the shortest.
+  #   locus -- whole gene +/- gene_flank. Always shows TSS and TES, but the
+  #            scale differs per gene, so a 200 bp G4 peak is a hairline in Bcl2.
+  views: [tss, locus]
+  n_loci: 5                           # mode "peaks" only
+  padding: 5000                       # "tss" view: bp each side -> 10 kb window
+  gene_flank: 2000                    # "locus" view: bp each side of the gene
   replicate: 1                        # use rep-1 bigWig per genotype
   ideogram_cache: "cache/ideogram_mm10.rds"  # offline cytoband cache
 
@@ -325,8 +367,100 @@ metaprofile:
                                  # mean_replicate_profile() while the bigWigs are
                                  # still hot and asserts the cached path
                                  # reproduces it at tolerance 0 (~15 s/genotype).
-  expr_rebuild_cache: false      # true forces the ~30 min bigWig pass even when
+  expr_rebuild_cache: false
+  # -- Stage N (rules 52/53): TSS -> TES gene metaprofiles, COMPOSITE axis -----
+  # Same analysis as rules 50/51 with the window widened from "TSS +/- 2 kb" to
+  # the whole transcription unit.
+  #
+  # v2 (2026-09-15): the pure scale-regions layout was REPLACED because it was
+  # misleading. It put 50 bp flank bins next to body bins of median 323 bp -- a
+  # 6.5x resolution step at exactly the TSS -- and that step, not biology, drew
+  # the vertical cliff at the TSS in every v1 figure. Measured on the same genes
+  # and the same bigWigs at a flat 50 bp (rule 50): TSS -25 bp = 4.59,
+  # +25 bp = 4.53, +275 bp = 3.58, +530 bp = 2.95. G4 signal carries ~500 bp
+  # PAST the TSS and decays smoothly; v1 reported that whole decay as two
+  # numbers (3.67, 2.96). And a v1 body bin was the gene's own length / 60, so
+  # it meant a different distance for every gene: 32 bp at the 5th percentile,
+  # 323 bp median, 3,352 bp at the 95th, 597 kb at the max. 37% of genes had a
+  # first body bin wider than the 500 bp decay. The median mm10 5'UTR is 161 bp
+  # and 68.9% of genes had a first body bin wider than that, so the 5'UTR had no
+  # dedicated bin anywhere on the axis.
+  #
+  # v2 scales ONLY the deep interior. Both anchors are fixed bp at a fixed bin
+  # size, which makes the TSS block directly comparable to rule 50's figure:
+  #   [TSS-W .. TSS+W]   [ interior, scaled ]   [TES-W .. TES+W]
+  #     real bp, 50 bp        NOT bp                real bp, 50 bp
+  expr_gene_anchor_window: 2000 # bp each side of BOTH the TSS and the TES.
+                                # 2000 on purpose: it matches metaprofile
+                                # half_width, so the TSS block of these figures
+                                # and rule 50's tss_signal_by_expression sit on
+                                # the same grid and can be overlaid.
+  expr_gene_anchor_bin: 50      # bp per anchor bin -> 80 bins per anchor block.
+                                # Same 50 bp as rule 50's 80 bins over +/-2 kb.
+  expr_gene_body_bins: 60       # bins for the SCALED INTERIOR only (not the
+                                # whole body any more). Interior = the gene minus
+                                # both anchor windows; median 365 bp per bin.
+  expr_gene_min_interior: 1000  # the two anchor windows must not overlap, and a
+                                # sliver of interior between them would be noise.
+  # Floor implied by the layout: 2*anchor_window + min_interior = 5000 bp.
+  # MEASURED COST of that floor (2026-09-15) -- stated here because it is the
+  # one real price of the v2 axis and it is NOT uniform across the groups:
+  # (Counted against the v1 gene set, i.e. the 1 kb floor. The script's runtime
+  #  message counts against rule 50's full 24,464-promoter universe instead, so
+  #  its numbers are larger -- e.g. silent -1,602 there vs -1,273 here -- because
+  #  that universe also contains the sub-1 kb genes v1 had already excluded.)
+  #   21,946 genes (v1, 1 kb floor) -> 18,219 genes (83.0%)
+  #   dropped: silent 1,273 (24.2%), Q1 603 (16.1%), Q2 421 (11.2%),
+  #            Q3 314 (8.3%), Q4 420 (11.2%)
+  # Silent genes are shorter (median 13.4 kb vs 23.7-31.2 kb for the quartiles),
+  # so the floor reweights that curve hardest. Script 52 writes the per-group
+  # attrition into gene_body_expression_counts.csv and names it in the figure
+  # subtitle rather than letting the composition shift silently. Short genes are
+  # not lost to the project -- rule 50 profiles them at the TSS with no floor.
+  expr_gene_min_length: 5000
+  # Length tertiles. The interior is still scaled, so a bin there is still a
+  # different distance for a 5 kb gene than for a 500 kb one; splitting the
+  # figure by gene-length tertile makes that confound visible instead of
+  # assumed. It also separates it from expression, which correlates with length
+  # (median: silent 20.6 kb, Q1 25.9, Q2 28.7, Q3 31.2, Q4 27.4 kb).
+  expr_gene_length_strata: 3
+  # Neutral grey ramp on purpose: the length figure is a DIAGNOSTIC (is the
+  # interior scaling distorting the comparison?), not a biological result, and a
+  # third coloured ramp next to the G4 and R-loop ones would read as a third
+  # assay. Ordered dark = long.
+  expr_length_palette: ["#BDBDBD", "#737373", "#252525"]
+  expr_gene_rebuild_cache: false      # true forces the ~30 min bigWig pass even when
                                  # the cache exists and validates.
+
+  # ---- Stage N, second assay + genotype-overlay figures -------------------
+  # Rule 52 runs the SAME scaled gene-body pass for every assay listed here,
+  # one cache per assay (the cache name already carries the assay, so the two
+  # cannot collide). Rule 53 reads only the G4_BG4 cache -- topology is a
+  # property of a G4 peak, so there is no R-loop topology figure.
+  #
+  # Cost of the second assay, measured 2026-09-15 on the G4 pass: ~12 s to load
+  # one RleList plus ~1.2 s to bin 21,946 genes. R-loop is 8 bigWigs against
+  # G4's 12, so ~1.8 min on top of G4's ~2.6 min. Drop Rloop_S96 from this list
+  # to go back to the G4-only rule; nothing else needs changing.
+  expr_gene_assays: [G4_BG4, Rloop_S96]
+
+  # R-loop quartile ramp. DELIBERATELY not the blue->red of expr_palette: these
+  # figures sit next to the G4 ones in a talk and the assay must be readable
+  # from the colour alone, without reading the title. PuOr (purple -> orange),
+  # so it is colourblind-safe and keeps the same dark-is-low reading direction
+  # as the G4 ramp. Interpolated to expr_n_quantiles the same way expr_palette
+  # is, so these 4 anchors ARE the colours at the default n = 4.
+  # Rejected: viridis (Q4 lands on yellow, unusable on a poster) and teal ->
+  # magenta (teal reads as blue at projector line widths).
+  expr_rloop_palette: ["#542788", "#998EC3", "#F1A340", "#B35806"]
+
+  # Genotype overlay: all profiled genes, no expression split, one curve per
+  # genotype on a single panel. Okabe-Ito, which is categorical rather than
+  # ordered -- correct here, because WT/DHX36KO/FANCJKO/dKO are not a ranked
+  # scale, and it also keeps the overlay visually distinct from BOTH quartile
+  # ramps. Order follows main_genotypes (WT, DHX36KO, FANCJKO, dKO).
+  expr_gene_overlay: true
+  expr_genotype_palette: ["#333333", "#0072B2", "#D55E00", "#CC79A7"]
 
 # ---- All-PQS / multi-G4 motif analysis (DeepG4 rules 27-32) ---------------
 motif_analysis:

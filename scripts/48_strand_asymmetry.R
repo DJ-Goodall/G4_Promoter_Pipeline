@@ -53,9 +53,14 @@
 #           results/tables/{strand_bias_summary,strand_bias_relative,
 #             g4_detection_by_strand,g4_score_stats}.tsv
 #           results/tables/{strand_score_tests,strand_detection_tests}.tsv  [v1.1]
+#           results/tables/strand_mirrored_profiles.csv                   [v1.2]
 #           results/figures/22_strand/{strand_bias_comprehensive,
-#             metaprofile_by_strand,mean_signal_by_strand,
-#             metaprofile_template_vs_coding}.{pdf,png}
+#             metaprofile_strand_mirrored,metaprofile_strand_mirrored_generel,
+#             mean_signal_by_strand}.{pdf,png}
+#
+# v1.2 (2026-09-15) RETIRES metaprofile_by_strand.* and
+# metaprofile_template_vs_coding.*: both were start-anchored with a
+# 3-replicate SEM. See the block above the new figures for what replaced them.
 # ============================================================================
 
 suppressPackageStartupMessages({
@@ -409,91 +414,230 @@ pD <- ggplot(gl(g4_detection_by_strand), aes(genotype, pct_with_motif, fill = st
 p_comp <- cowplot::plot_grid(pA, pB, pC, pD, ncol = 2, labels = NULL)
 save_plot(p_comp, "strand_bias_comprehensive", "22_strand", fig_root, width = 16, height = 12)
 
-# --- Strand + template/coding metaprofiles ----------------------------------
+# --- v1.2: mirrored, region-centred strand metaprofiles ---------------------
+# REPLACES metaprofile_by_strand / mean_signal_by_strand /
+# metaprofile_template_vs_coding. Three changes, in order of how much they
+# mattered:
+#
+# (1) ANCHOR. The old prof_matrix() built its window from
+#     start(region) - half_width, so peaks were aligned by their LEFT EDGE and
+#     the centre of the plot was not the G4. Peak widths here span a wide range,
+#     so that smears exactly the feature the figure is about. The replacement
+#     anchors on the region centre through center_window() + the shared
+#     compute_profile_matrix(), which is what rules 24/30/31 use -- so these
+#     curves are now on the same grid as every other metaprofile in the repo.
+#
+# (2) UNIT. The old figure profiled PEAKS. This profiles the promoter / 5'UTR
+#     REGION that hosts the peak, anchored at its centre (= the TSS for
+#     promoters). A peak-anchored curve necessarily peaks at zero -- that is
+#     where the peak is -- so it cannot show WHERE relative to the TSS a
+#     strand-assigned G4 sits, which is the question.
+#
+# (3) SEM. The old prof_ci() took sd across the 3 REPLICATES (n = 3), i.e. a
+#     statement about library reproducibility, not about the regions. This uses
+#     profile_from_rep_mean(), whose SEM is across regions, matching every other
+#     metaprofile here. See the limitation note printed at the end.
+#
+# LAYOUT. One curve is drawn above y = 0 and the other below it, both as
+# POSITIVE intensities -- the y-axis is labelled with absolute values, so a peak
+# below the line is a peak, not a depletion. Mirroring costs nothing
+# statistically; it removes the overplotting that made the two curves
+# indistinguishable where they agreed.
+#
+# TWO SPLITS, and they are not interchangeable:
+#   genomic  -- G4 on the reference + vs - strand. This is the literal +/-
+#               question, but note the caveat in the figure subtitle: the window
+#               is GENE-ORIENTED (compute_profile_matrix flips minus-strand
+#               regions, helpers.R:314), so a "+ strand G4" curve pools
+#               coding-strand G4s at + genes with template-strand G4s at -
+#               genes. It answers a genome-level question on a gene-level axis.
+#   generel  -- coding (non-template) vs template strand, i.e. the same call
+#               made relative to the host gene. On a gene-oriented axis this is
+#               the coherent split, and it is the one to read for biology.
+# Both are row subsets of the same matrix, so the second is free.
+mw <- as.integer(sc$mirror_window_size %||% 250L)
+if (!mw %in% window_sizes)
+  stop("strand.mirror_window_size (", mw, ") is not one of strand.window_sizes (",
+       paste(window_sizes, collapse = ", "), ").")
+min_n <- as.integer(sc$mirror_min_regions %||% 20L)
+
 bw_meta <- build_bw_meta(cfg$paths$bigwig_dir, genotypes = genotype_order, assay = "G4_BG4")
 bw_by_genotype <- split(bw_meta$filepath, as.character(bw_meta$genotype))
 
-# start-anchored, strand-flipping profile (faithful to strand RMD s7)
-prof_matrix <- function(regions, bw_fp) {
-  cov <- read_bigwig_rle(bw_fp)
-  shared <- intersect(as.character(GenomicRanges::seqnames(regions)), names(cov))
-  if (!length(shared)) return(matrix(NA_real_, length(regions), n_bins))
-  bm <- matrix(NA_real_, length(regions), n_bins)
-  for (chr in shared) {
-    ci <- which(as.character(GenomicRanges::seqnames(regions)) == chr)
-    if (!length(ci)) next
-    chr_len <- length(cov[[chr]])
-    st <- pmax(1L, GenomicRanges::start(regions[ci]) - half_width)
-    en <- pmin(chr_len, st + 2L * half_width)
-    vw <- IRanges::Views(cov[[chr]], start = st, end = en)
-    sm <- do.call(rbind, lapply(vw, function(v) { x <- as.numeric(v)
-      if (length(x) < 2 * half_width + 1) x <- c(x, rep(NA_real_, 2 * half_width + 1 - length(x))); x }))
-    bi <- cut(seq_len(ncol(sm)), breaks = n_bins, labels = FALSE)
-    for (b in seq_len(n_bins)) bm[ci, b] <- rowMeans(sm[, which(bi == b), drop = FALSE], na.rm = TRUE)
-    minus <- as.character(GenomicRanges::strand(regions[ci])) == "-"
-    if (any(minus)) bm[ci[minus], ] <- bm[ci[minus], seq(n_bins, 1L), drop = FALSE]
-  }
-  bm
-}
-prof_ci <- function(regions, bws) {
-  if (length(regions) == 0) return(list(mean = rep(NA, n_bins), lower = rep(NA, n_bins), upper = rep(NA, n_bins)))
-  rm <- do.call(rbind, lapply(bws, function(fp) colMeans(prof_matrix(regions, fp), na.rm = TRUE)))
-  m <- colMeans(rm, na.rm = TRUE)
-  sem <- apply(rm, 2, function(x) sd(x, na.rm = TRUE) / sqrt(sum(!is.na(x))))
-  z <- qnorm(0.975); list(mean = m, lower = m - z * sem, upper = m + z * sem)
-}
-mk_gr <- function(df) GenomicRanges::GRanges(df$seqname,
-  IRanges::IRanges(df$peak_start, df$peak_end),
-  strand = ifelse(df$g4_detected_strand %in% c("+", "-"), df$g4_detected_strand, "*"))
+chrom_sizes <- default_chrom_sizes(cfg$std_chroms)
 
-collect <- function(split_col, levels) {
+# Region centres, one row per (genotype x hosted region). A promoter may host
+# several scored peaks; the STRONGEST (max |G4Hunter|) supplies the call, which
+# is the same "strongest overlapping peak wins" convention assign_region_topology()
+# uses for topology -- not a new rule invented here.
+build_region_set <- function(g) {
+  sdf <- sequences_df[sequences_df$genotype == g & sequences_df$window_size == mw &
+                      sequences_df$g4_detected_strand %in% c("+", "-"), ]
+  if (!nrow(sdf)) return(NULL)
+  pk <- GenomicRanges::GRanges(sdf$seqname,
+          IRanges::IRanges(sdf$peak_start, sdf$peak_end))
   out <- list()
-  for (g in genotype_order) for (rt in region_types) {
-    sub <- sequences_df[sequences_df$genotype == g & sequences_df$region_type == rt &
-                        sequences_df$window_size == 250, ]
-    for (lv in levels) {
-      d <- sub[sub[[split_col]] == lv, ]
-      pr <- prof_ci(mk_gr(d), bw_by_genotype[[g]])
-      out[[length(out) + 1]] <- data.frame(position_bin = seq_len(n_bins), genotype = g,
-        region_type = rt, level = lv, signal = pr$mean, lower = pr$lower, upper = pr$upper,
-        n = nrow(d))
-    }
-    evict_bigwigs(bw_by_genotype[[g]])
+  for (rt in region_types) {
+    rr <- reg[[rt]]
+    ov <- GenomicRanges::findOverlaps(pk, rr, ignore.strand = TRUE)
+    if (!length(ov)) next
+    q <- S4Vectors::queryHits(ov); sj <- S4Vectors::subjectHits(ov)
+    # strongest peak per region
+    o <- order(sj, -abs(sdf$g4_score[q]))
+    q <- q[o]; sj <- sj[o]
+    keep <- !duplicated(sj)
+    q <- q[keep]; sj <- sj[keep]
+    win_rt <- center_window(rr[sj], width = 2L * half_width)
+    S4Vectors::mcols(win_rt) <- NULL
+    win_rt$region_type <- rt
+    win_rt$genomic     <- sdf$g4_detected_strand[q]
+    win_rt$generel     <- sdf$g4_strand_class[q]      # coding / template / unmapped
+    out[[rt]] <- win_rt
   }
-  dplyr::bind_rows(out)
+  if (!length(out)) return(NULL)
+  w <- suppressWarnings(do.call(c, unname(out)))
+  GenomeInfoDb::seqlevels(w, pruning.mode = "coarse") <-
+    intersect(GenomeInfoDb::seqlevels(w), names(chrom_sizes))
+  GenomeInfoDb::seqlengths(w) <- chrom_sizes[GenomeInfoDb::seqlevels(w)]
+  w <- GenomicRanges::trim(w)
+  # rep_mean_matrix() refuses unequal widths (compute_profile_matrix() recycles
+  # them, helpers.R:303), so drop anything the chromosome edge clamped.
+  n_pre <- length(w)
+  w <- w[GenomicRanges::width(w) == 2L * half_width]
+  if (length(w) < n_pre)
+    message("  ", g, ": dropped ", n_pre - length(w), " edge-clamped window(s).")
+  w
 }
-strand_prof <- collect("g4_detected_strand", c("+", "-"))
+
+positions <- seq(-half_width, half_width, length.out = n_bins)
+strand_levels <- list(
+  genomic = c("+", "-"),
+  generel = c("coding", "template"))
+strand_cols <- c("+" = "#E41A1C", "-" = "#377EB8",
+                 coding = "#D95F02", template = "#1B9E77")
+
+prof_rows <- list()
+for (g in genotype_order) {
+  w <- build_region_set(g)
+  if (is.null(w) || !length(w)) { message("No scored regions for ", g); next }
+  message("Profiling ", g, ": ", length(w), " regions over ",
+          length(bw_by_genotype[[g]]), " bigWigs ...")
+  rm_g <- rep_mean_matrix(w, bw_by_genotype[[g]], n_bins = n_bins,
+                          half_width = half_width)
+  for (split in names(strand_levels)) {
+    for (rt in region_types) {
+      for (lv in strand_levels[[split]]) {
+        idx <- which(w$region_type == rt & S4Vectors::mcols(w)[[split]] == lv)
+        # n is recorded BEFORE the minimum-size guard, so a curve that is too
+        # small to draw still reports its true size rather than vanishing.
+        n_lv <- length(idx)
+        if (n_lv == 0L) {
+          prof_rows[[length(prof_rows) + 1L]] <- data.frame(
+            bin = NA_integer_, position = NA_real_, mean = NA_real_, sem = NA_real_,
+            n_regions = 0L, genotype = g, region_type = rt, split = split,
+            level = lv, drawn = FALSE, stringsAsFactors = FALSE)
+          next
+        }
+        p <- profile_from_rep_mean(rm_g, idx, positions = positions)
+        p$genotype <- g; p$region_type <- rt; p$split <- split; p$level <- lv
+        p$drawn <- n_lv >= min_n
+        prof_rows[[length(prof_rows) + 1L]] <- p
+      }
+    }
+  }
+  evict_bigwigs(bw_by_genotype[[g]])   # 12 whole-genome RleLists will not fit
+}
+if (!length(prof_rows)) stop("No strand metaprofiles could be computed.")
+
+strand_prof <- dplyr::bind_rows(prof_rows)
 strand_prof$genotype <- factor(strand_prof$genotype, levels = genotype_order)
-p_meta <- ggplot(dplyr::filter(strand_prof, !is.na(signal)),
-    aes(position_bin, signal, colour = level, fill = level, linetype = level)) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.15, colour = NA) +
-  geom_line(linewidth = 1) + facet_grid(region_type ~ genotype) +
-  scale_colour_manual(values = c("+" = "#E41A1C", "-" = "#377EB8")) +
-  scale_fill_manual(values = c("+" = "#E41A1C", "-" = "#377EB8")) +
-  labs(title = "G4 CUT&Tag signal by detected strand (95% CI)",
-       x = "Position (bin, +/-2kb)", y = "Mean signal", colour = "strand",
-       fill = "strand", linetype = "strand") + theme_pub()
-save_plot(p_meta, "metaprofile_by_strand", "22_strand", fig_root, width = 14, height = 8)
+# The mirror is a PLOTTING transform only: `mean` stays the true intensity and
+# `signed` is what is drawn. Anything downstream must read `mean`.
+down_level <- c(genomic = "-", generel = "template")
+strand_prof$signed <- ifelse(strand_prof$level == down_level[strand_prof$split],
+                             -strand_prof$mean, strand_prof$mean)
+strand_prof$signed_lo <- strand_prof$signed -
+  ifelse(strand_prof$level == down_level[strand_prof$split], -1, 1) * strand_prof$sem
+strand_prof$signed_hi <- strand_prof$signed +
+  ifelse(strand_prof$level == down_level[strand_prof$split], -1, 1) * strand_prof$sem
+readr::write_csv(strand_prof, "results/tables/strand_mirrored_profiles.csv")
 
-p_meanbar <- strand_prof %>% dplyr::filter(!is.na(signal)) %>%
-  dplyr::group_by(genotype, region_type, level) %>%
-  dplyr::summarise(mean_signal = mean(signal, na.rm = TRUE), .groups = "drop") %>%
-  ggplot(aes(level, mean_signal, fill = level)) + geom_col() +
-  facet_grid(region_type ~ genotype) +
-  scale_fill_manual(values = c("+" = "#E41A1C", "-" = "#377EB8")) +
-  labs(title = "Mean G4 signal by strand", x = "strand", y = "Mean signal") + theme_pub()
-save_plot(p_meanbar, "mean_signal_by_strand", "22_strand", fig_root, width = 12, height = 8)
+sem_note <- paste("ribbon = SEM across regions, NOT a test of the strand",
+                  "difference; free y per panel")
 
-tc_prof <- collect("g4_strand_class", c("template", "coding"))
-tc_prof$genotype <- factor(tc_prof$genotype, levels = genotype_order)
-p_tc <- ggplot(dplyr::filter(tc_prof, !is.na(signal)),
-    aes(position_bin, signal, colour = level, fill = level)) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, colour = NA) +
-  geom_line(linewidth = 0.8) + facet_grid(region_type ~ genotype) +
-  scale_colour_manual(values = c(template = "#1B9E77", coding = "#D95F02")) +
-  scale_fill_manual(values = c(template = "#1B9E77", coding = "#D95F02")) +
-  labs(title = "G4 signal: template vs coding strand (95% CI)",
-       x = "Position (bin, +/-2kb)", y = "Mean signal", colour = "strand type",
-       fill = "strand type") + theme_pub()
-save_plot(p_tc, "metaprofile_template_vs_coding", "22_strand", fig_root, width = 14, height = 10)
+mirror_fig <- function(split, fname, title, up_lab, dn_lab, caveat = NULL) {
+  df <- strand_prof %>% dplyr::filter(split == !!split, drawn, !is.na(bin))
+  if (!nrow(df)) { message("Nothing to draw for split '", split, "'."); return(invisible(NULL)) }
+  lv <- strand_levels[[split]]
+  df$level <- factor(df$level, levels = lv)
+  n_lab <- strand_prof %>%
+    dplyr::filter(split == !!split) %>%
+    dplyr::distinct(genotype, region_type, level, n_regions, drawn) %>%
+    dplyr::group_by(genotype, region_type) %>%
+    dplyr::summarise(label = paste(sprintf("%s n=%s%s", level,
+                        format(n_regions, big.mark = ",", trim = TRUE),
+                        ifelse(drawn, "", " (not drawn)")), collapse = "  |  "),
+                     .groups = "drop")
+  p <- ggplot(df, aes(position, signed, colour = level, fill = level)) +
+    geom_hline(yintercept = 0, colour = "grey30", linewidth = 0.4) +
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey55") +
+    geom_ribbon(aes(ymin = signed_lo, ymax = signed_hi), alpha = 0.18, colour = NA) +
+    geom_line(linewidth = 0.8) +
+    geom_text(data = n_lab, aes(x = -Inf, y = Inf, label = label), inherit.aes = FALSE,
+              hjust = -0.03, vjust = 1.4, size = 2.3, colour = "grey25") +
+    facet_grid(region_type ~ genotype, scales = "free_y") +
+    # Both halves are positive intensities: the sign is layout, not direction.
+    scale_y_continuous(labels = function(x) format(abs(x), trim = TRUE)) +
+    scale_colour_manual(values = strand_cols, name = NULL, drop = FALSE) +
+    scale_fill_manual(values = strand_cols, guide = "none", drop = FALSE) +
+    labs(title = title,
+         subtitle = paste0(sprintf("%s ABOVE the line, %s BELOW; both axes are positive intensity (%d bp window, %d bins). ",
+                                   up_lab, dn_lab, 2L * half_width, n_bins),
+                           if (!is.null(caveat)) paste0("\n", caveat, " ") else "",
+                           "\n", sem_note),
+         x = "Distance to region centre (bp; = TSS for promoters)",
+         y = "Mean G4 CUT&Tag signal") +
+    theme_pub() + theme(legend.position = "bottom")
+  save_plot(p, fname, "22_strand", fig_root, width = 14, height = 8)
+}
+
+mirror_fig("genomic", "metaprofile_strand_mirrored",
+  "G4 CUT&Tag signal by the strand carrying the G4 (genomic)",
+  "+ strand G4", "- strand G4",
+  paste("CAVEAT: the window is gene-oriented (minus-strand regions are flipped),",
+        "so the '+' curve pools coding-strand G4s at + genes with template-strand",
+        "G4s at - genes. For the gene-relative split see the companion figure."))
+
+mirror_fig("generel", "metaprofile_strand_mirrored_generel",
+  "G4 CUT&Tag signal by the strand carrying the G4 (relative to the host gene)",
+  "coding (non-template) strand G4", "template strand G4",
+  paste("This is the coherent split on a gene-oriented axis, and the one to read",
+        "for biology. Peaks with no overlapping gene are 'unmapped' and excluded."))
+
+# Mean signal per strand, recomputed from the SAME profiles as the figures above
+# so the bar chart and the curves can no longer disagree.
+p_meanbar <- strand_prof %>%
+  dplyr::filter(!is.na(bin), n_regions > 0) %>%
+  dplyr::group_by(genotype, region_type, split, level) %>%
+  dplyr::summarise(mean_signal = mean(mean, na.rm = TRUE),
+                   n_regions = dplyr::first(n_regions), .groups = "drop") %>%
+  ggplot(aes(level, mean_signal, fill = level)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = format(n_regions, big.mark = ",", trim = TRUE)),
+            vjust = -0.3, size = 2.4, colour = "grey25") +
+  facet_grid(region_type ~ genotype + split, scales = "free_x", space = "free_x") +
+  scale_fill_manual(values = strand_cols, guide = "none") +
+  labs(title = "Mean G4 signal by the strand carrying the G4",
+       subtitle = "window mean of the same profiles plotted above; bar labels are n regions",
+       x = NULL, y = "Mean signal") +
+  theme_pub() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+save_plot(p_meanbar, "mean_signal_by_strand", "22_strand", fig_root,
+          width = 15, height = 8)
+
+message("\nRegions per (genotype, region_type, split, level):")
+print(as.data.frame(strand_prof %>%
+  dplyr::distinct(genotype, region_type, split, level, n_regions, drawn)))
+message("\nNOTE: SEM is across regions, so at these n the ribbon is narrow and every ",
+        "visible gap looks decisive. It measures region-to-region spread and is not ",
+        "a test of the strand difference.")
 message("Strand asymmetry analysis done.")

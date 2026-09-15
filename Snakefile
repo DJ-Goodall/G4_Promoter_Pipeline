@@ -17,7 +17,7 @@
 #   snakemake -n                 # dry run (DAG)
 #   snakemake --cores 4          # full run  (NO --use-conda; see README)
 # ============================================================================
-import glob, os, yaml
+import glob, os, re, yaml
 
 configfile: "config/config.yaml"
 
@@ -66,6 +66,51 @@ GENO     = config["genotypes"]
 PK_GENO  = config["peak_calling"]["genotypes"]
 PK_ASSAY = config["peak_calling"]["assays"]
 CONTRASTS = ["DHX36KO_vs_WT","FANCJKO_vs_WT","dKO_vs_WT","dKO_vs_DHX36KO","dKO_vs_FANCJKO"]
+
+# Rule 52 profiles every assay in metaprofile.expr_gene_assays over the same
+# gene set, one cache each. The tag appended to the R-loop figure names is
+# derived here EXACTLY as scripts/52 derives it (empty for the primary assay,
+# otherwise "_" + the lowercased part before the first underscore), so the two
+# cannot drift -- if they did, Snakemake would wait for a figure the script
+# never writes and the rule would fail at the end of a 5-minute run instead of
+# at parse time.
+GENE_EXPR_ASSAYS = config["metaprofile"]["expr_gene_assays"]
+
+def _gene_expr_cache(a):
+    # v2 layout (composite axis) -> a DIFFERENT cache name from v1's
+    # gene_expr_repmean_*, so a v1 cache can never be silently reused under the
+    # new binning. The v1 files are orphaned and should be deleted by hand.
+    return "cache/gene_composite_repmean_{a}_w{w}_ab{ab}_bb{bb}.rds".format(
+        a=a,
+        w=config["metaprofile"]["expr_gene_anchor_window"],
+        ab=config["metaprofile"]["expr_gene_anchor_bin"],
+        bb=config["metaprofile"]["expr_gene_body_bins"])
+
+def _gene_expr_tag(a):
+    if a == config["assay"]:
+        return ""
+    return "_" + re.sub(r"[^A-Za-z0-9]+", "", a.split("_")[0]).lower()
+
+# Rule 53's input. Kept as a scalar name because topology is a property of a G4
+# peak: rule 53 reads the primary assay's cache only, whatever else rule 52
+# profiled.
+GENE_EXPR_CACHE   = _gene_expr_cache(config["assay"])
+GENE_EXPR_CACHES  = [_gene_expr_cache(a) for a in GENE_EXPR_ASSAYS]
+_G25 = "results/figures/25_tss_tes_metaprofiles/"
+GENE_EXPR_FIGS = [
+    _G25 + "gene_signal_by_expression{t}{s}.pdf".format(t=_gene_expr_tag(a), s=suffix)
+    for a in GENE_EXPR_ASSAYS
+    for suffix in ("", "_shape", "_fixedcuts")
+] + [
+    _G25 + "gene_signal_by_genotype{t}{s}.pdf".format(t=_gene_expr_tag(a), s=suffix)
+    for a in GENE_EXPR_ASSAYS
+    for suffix in ("", "_shape")
+] + [
+    # gene-length tertiles: the diagnostic that makes the interior-scaling
+    # confound visible instead of assumed
+    _G25 + "gene_signal_by_length{t}.pdf".format(t=_gene_expr_tag(a))
+    for a in GENE_EXPR_ASSAYS
+]
 KOS = ["DHX36KO","FANCJKO","dKO"]
 
 # Stage-B peak/region caches (recomputed, not hand-built). Precompute all
@@ -157,13 +202,23 @@ rule all:
         "results/tables/strand_bias_summary.tsv",
         "results/tables/strand_g4_threshold_calibration.tsv",   # v1.1
         "results/figures/22_strand/strand_bias_comprehensive.pdf",
-        "results/figures/22_strand/metaprofile_by_strand.pdf",
+        "results/figures/22_strand/metaprofile_strand_mirrored.pdf",   # v1.2
         "results/figures/23_gviz/.done",
         # Stage M — TSS metaprofiles by RNA-seq expression quartile (rules 50-51).
         # Listed here so the pair can never be orphaned from the DAG the way rule
         # 46 was; target the rules by name to run only them.
         "results/figures/24_expression_metaprofiles/tss_signal_by_expression.pdf",
         "results/figures/24_expression_metaprofiles/tss_signal_by_expression_topology.pdf",
+        # Stage N — the same analysis widened from TSS +/- 2 kb to TSS -> TES.
+        # Every rule-52 figure, not one representative. A rule enters the DAG
+        # only when something it is asked for is missing: with just
+        # gene_signal_by_expression.pdf listed, adding the R-loop and
+        # genotype-overlay outputs to the rule changed nothing, because that
+        # one file already existed and satisfied the target (observed
+        # 2026-09-15 -- the dry run showed 0 jobs). Unpacking the generated
+        # list keeps this in step with metaprofile.expr_gene_assays.
+        *GENE_EXPR_FIGS,
+        "results/figures/25_tss_tes_metaprofiles/gene_signal_by_expression_topology.pdf",
 
 
 # ===========================================================================
@@ -773,16 +828,33 @@ rule strand_asymmetry:
         t5 = "results/tables/strand_score_tests.tsv",
         t6 = "results/tables/strand_detection_tests.tsv",
         t7 = "results/tables/strand_g4_threshold_calibration.tsv",
+        # v1.2: metaprofile_by_strand and metaprofile_template_vs_coding are
+        # RETIRED. Both were start-anchored (peaks aligned by left edge, not
+        # centre) with a 3-replicate SEM. The replacements are region-centred
+        # via the shared helpers and mirrored about y = 0.
+        t8 = "results/tables/strand_mirrored_profiles.csv",
         f1 = "results/figures/22_strand/strand_bias_comprehensive.pdf",
-        f2 = "results/figures/22_strand/metaprofile_by_strand.pdf",
-        f3 = "results/figures/22_strand/mean_signal_by_strand.pdf",
-        f4 = "results/figures/22_strand/metaprofile_template_vs_coding.pdf",
+        f2 = "results/figures/22_strand/metaprofile_strand_mirrored.pdf",
+        f3 = "results/figures/22_strand/metaprofile_strand_mirrored_generel.pdf",
+        f4 = "results/figures/22_strand/mean_signal_by_strand.pdf",
     log: "logs/48_strand_asymmetry.log"
     shell: "Rscript scripts/48_strand_asymmetry.R {CONFIG} > {log} 2>&1"
 
+# In mode "genes" the filenames are fully determined by config, so every figure
+# is DECLARED rather than hidden behind the .done sentinel -- a gene that fails
+# to render then fails the rule instead of silently going missing. The sentinel
+# is kept because mode "peaks" names its files from the data.
+GVIZ_FIGS = ([
+    "results/figures/23_gviz/{g}_{v}.pdf".format(g=g, v=v)
+    for g in config["gviz"]["genes"] for v in config["gviz"]["views"]
+] if config["gviz"].get("mode", "genes") == "genes" else [])
+
 rule gviz_locus_tracks:
-    input: scored = "cache/sequences_scored.rds", bw = G4_BW
-    output: touch("results/figures/23_gviz/.done")
+    input: scored = "cache/sequences_scored.rds",
+           union = "cache/peaks_G4_BG4_union.rds", bw = G4_BW
+    output: GVIZ_FIGS,
+            loci = "results/tables/gviz_loci.csv",
+            done = touch("results/figures/23_gviz/.done")
     log: "logs/49_gviz_locus_tracks.log"
     shell: "Rscript scripts/49_gviz_locus_tracks.R {CONFIG} > {log} 2>&1"
 
@@ -834,3 +906,61 @@ rule tss_expression_topology_metaprofiles:
         fig_shape = "results/figures/24_expression_metaprofiles/tss_signal_by_expression_topology_shape.pdf",
     log: "logs/51_tss_expression_topology_metaprofiles.log"
     shell: "Rscript scripts/51_tss_expression_topology_metaprofiles.R {CONFIG} > {log} 2>&1"
+
+
+# ===========================================================================
+# Stage N - TSS -> TES scaled gene-body metaprofiles by expression (rules 52-53)
+# ===========================================================================
+# Stage M's question over the whole transcription unit. Same 50/51 split: rule
+# 52 owns the ONLY bigWig pass and caches one replicate-averaged (gene x bin)
+# matrix per genotype; rule 53 re-cuts it by topology and declares NO bigWig
+# input -- if it ever grows one, the split has been broken.
+#
+# The gene body is COMPRESSED to a fixed bin count (deepTools scale-regions),
+# because bodies here span 1 kb to 35.8 Mb and no fixed window frames them all.
+# Only the flanks are real bp. Consequence, repeated in every figure subtitle:
+# the x-axis is not linear in distance between the TSS and the TES.
+#
+# Rule 52 reads rule 50's tss_expression_gene_groups.csv rather than recomputing
+# the quartiles, so a gene sits in the same quartile in the TSS-window and
+# whole-gene figures by construction and the two can be compared directly.
+#
+# The cache name carries assay + flank + both bin counts, so changing any of
+# them yields a different file instead of silently reusing a stale matrix
+# (cache/cooc_prof_*.rds from rule 40 encodes none of its parameters and does
+# exactly that).
+# R-loop bigWigs are declared unconditionally rather than conditionally on
+# expr_gene_assays: they are an input to seven other rules already, so nothing
+# is gained by making this rule's DAG edge depend on a config list, and a
+# conditional input that silently disappears is harder to debug than one extra
+# edge.
+rule gene_body_expression_metaprofiles:
+    input: groups = "results/tables/tss_expression_gene_groups.csv",
+           bw = G4_BW + RLOOP_BW
+    output:
+        repmean = GENE_EXPR_CACHES,
+        genes = "results/tables/gene_body_expression_genes.csv",
+        counts_csv = "results/tables/gene_body_expression_counts.csv",
+        profiles = "results/tables/gene_body_expression_profiles.csv",
+        shape = "results/tables/gene_body_expression_shape_stats.csv",
+        geno_profiles = "results/tables/gene_body_genotype_profiles.csv",
+        geno_shape = "results/tables/gene_body_genotype_shape_stats.csv",
+        len_profiles = "results/tables/gene_body_length_profiles.csv",
+        figs = GENE_EXPR_FIGS,
+        fig_n = _G25 + "gene_expression_group_sizes.pdf",
+    log: "logs/52_gene_body_expression_metaprofiles.log"
+    shell: "Rscript scripts/52_gene_body_expression_metaprofiles.R {CONFIG} > {log} 2>&1"
+
+rule gene_body_expression_topology_metaprofiles:
+    input: repmean = GENE_EXPR_CACHE,
+           genes = "results/tables/gene_body_expression_genes.csv",
+           promoters = config["paths"]["promoters_rds"],
+           peaks = "cache/peaks.rds", topo = "results/tables/peak_topology.csv"
+    output:
+        profiles = "results/tables/gene_body_expression_topology_profiles.csv",
+        counts_csv = "results/tables/gene_body_expression_topology_counts.csv",
+        shape = "results/tables/gene_body_expression_topology_shape_stats.csv",
+        fig = "results/figures/25_tss_tes_metaprofiles/gene_signal_by_expression_topology.pdf",
+        fig_shape = "results/figures/25_tss_tes_metaprofiles/gene_signal_by_expression_topology_shape.pdf",
+    log: "logs/53_gene_body_expression_topology_metaprofiles.log"
+    shell: "Rscript scripts/53_gene_body_expression_topology_metaprofiles.R {CONFIG} > {log} 2>&1"

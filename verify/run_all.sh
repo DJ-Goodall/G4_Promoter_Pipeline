@@ -66,6 +66,9 @@ run "4. Loop heuristic vs G4ShapePredictor on the literature controls" \
 run "5. Calibrate the G4Hunter motif threshold against real mm10" \
     verify/calibrate_g4_threshold.R
 
+run "6. Scaled-region profile geometry (rules 52/53)" \
+    verify/test_scaled_profile.R
+
 echo ""
 if [ "$fail" -eq 0 ]; then
   echo "=============================================================="
