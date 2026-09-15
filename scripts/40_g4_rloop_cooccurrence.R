@@ -11,6 +11,11 @@
 #   2. Stratified metaprofile -- split promoters into G4 quartiles, overlay the
 #      mean R-loop TSS metaprofile per quartile (and the reciprocal). Dose-
 #      dependent spatial co-occurrence.
+#   2b. TSS signal-vs-signal scatter, per quartile -- the same strata, but
+#      plotted as G4-at-TSS vs R-loop-at-TSS with one hex-binned panel per
+#      (genotype x quartile). The metaprofile averages promoters together and so
+#      destroys the promoter-to-promoter pairing; this keeps it, and answers
+#      "inside a stratum, does a promoter with more G4 also carry more R-loop?"
 #   3. G4+/- promoter violin -- R-loop signal at G4-peak+ vs G4-peak- promoters
 #      (and reciprocal), vs a random-window null. Wilcoxon + Cliff's delta.
 #   4. dG4 vs dR-loop KO views -- per-promoter differential (voom, KO vs WT)
@@ -27,10 +32,14 @@
 # Outputs:  results/tables/g4_rloop_stratified_profiles.csv
 #           results/tables/g4_rloop_violin_stats.csv
 #           results/tables/g4_rloop_ko_differential.csv
+#           results/tables/g4_rloop_tss_scores.csv
+#           results/tables/g4_rloop_tss_quartile_correlation.csv
 #           results/figures/19_g4_rloop_cooccurrence/
 #             g4_rloop_promoter_heatmap.{pdf,png}
 #             g4_rloop_stratified_rloopByG4.{pdf,png}
 #             g4_rloop_stratified_g4ByRloop.{pdf,png}
+#             g4_rloop_tss_scatter_byG4quartile.{pdf,png}
+#             g4_rloop_tss_scatter_byRloopquartile.{pdf,png}
 #             g4_rloop_promoter_violin.{pdf,png}
 #             g4_rloop_delta_scatter.{pdf,png}
 #             g4_rloop_rloop_volcano.{pdf,png}
@@ -66,6 +75,19 @@ heat_cap  <- cc$heatmap_cap_z %||% 3
 voom_padj <- cc$voom_padj %||% (cfg$differential$voom_padj %||% 0.1)
 voom_lfc  <- cc$voom_lfc  %||% (cfg$differential$voom_lfc  %||% 0.585)
 prof_sub  <- cc$profile_subsample_n %||% NULL
+tss_hw    <- as.integer(cc$tss_scatter_half_width %||% 250L)
+hex_bins  <- as.integer(cc$hexbin_bins %||% 60L)
+tss_hex_bins <- as.integer(cc$tss_scatter_hexbin_bins %||% 45L)
+tss_fill_lim <- as.numeric(unlist(cc$tss_scatter_fill_limits %||% list(1, 100)))
+tss_fill_brk <- as.numeric(unlist(cc$tss_scatter_fill_breaks %||% list(1, 10, 100)))
+stopifnot(length(tss_fill_lim) == 2, tss_fill_lim[1] > 0, tss_fill_lim[2] > tss_fill_lim[1])
+volc_hex_cls <- as.character(unlist(cc$volcano_hex_classes %||% list("stable", "ambiguous")))
+use_hexbin <- isTRUE(cc$hexbin %||% TRUE)
+if (use_hexbin && !requireNamespace("hexbin", quietly = TRUE)) {
+  message("Package 'hexbin' unavailable; the scatter views fall back to points. ",
+          "install.packages('hexbin') to get small, Illustrator-editable PDFs.")
+  use_hexbin <- FALSE
+}
 
 std_chroms <- cfg$std_chroms
 assays     <- c(G4_BG4 = "G4_BG4", Rloop_S96 = "Rloop_S96")
@@ -269,6 +291,137 @@ plot_strat(strat_tbl %>% dplyr::filter(stratify_by == "Rloop_quartile"),
            "G4 TSS metaprofile by promoter R-loop quartile",
            "g4_rloop_stratified_g4ByRloop")
 
+# ---------------------------------------------------------------------------
+# View 2b: G4-at-TSS vs R-loop-at-TSS, one panel per (genotype x quartile)
+# ---------------------------------------------------------------------------
+# View 2 averages promoters together within a quartile, which is exactly what
+# destroys the promoter-to-promoter pairing: two quartiles can have identical
+# mean profiles whether or not the individual promoters that are high for G4 are
+# the same ones that are high for R-loop. This view keeps the pairing.
+#
+# "Signal at the TSS" is a deliberately NARROWER window (tss_hw, default 250 bp)
+# than the +/- half_width mean that defines the quartiles. If both used the same
+# +/- 2 kb mean, x would BE the variable the panels were cut on and every
+# panel's r would be attenuated by range restriction on x by construction --
+# an artefact shaped exactly like the hypothesis. Using the central bins makes x
+# a different measurement. Range restriction is broken, not eliminated (the two
+# windows still correlate), so read the r values as a TREND ACROSS PANELS rather
+# than as absolute coupling strengths.
+#
+# Costs no bigWig I/O: these are column subsets of the matrices View 1/2 already
+# hold, and the strata come from the same strata_of() call, so panel k here is
+# the same promoter set as curve Qk in the metaprofile above.
+tss_cols <- which(abs(positions) <= tss_hw)
+if (length(tss_cols) < 1)
+  stop("tss_scatter_half_width = ", tss_hw, " selects no bin: the profile grid is ",
+       signif(positions[2] - positions[1], 3), " bp per bin over +/- ", half_width,
+       ". Raise it to at least half a bin width.")
+message(sprintf("TSS scatter score: %d of %d bins (|position| <= %d bp, %.1f bp/bin)",
+                length(tss_cols), n_bins, tss_hw, positions[2] - positions[1]))
+
+q_lvls <- paste0("Q", seq_len(n_strata))
+tss_scores <- dplyr::bind_rows(lapply(genotypes, function(g) {
+  g4m <- get_prof(g, "G4_BG4"); rlm <- get_prof(g, "Rloop_S96")
+  data.frame(
+    genotype       = g,
+    entrez         = names(prom_prof),
+    g4_tss         = rowMeans(g4m[, tss_cols, drop = FALSE], na.rm = TRUE),
+    rloop_tss      = rowMeans(rlm[, tss_cols, drop = FALSE], na.rm = TRUE),
+    g4_window      = rowMeans(g4m, na.rm = TRUE),
+    rloop_window   = rowMeans(rlm, na.rm = TRUE),
+    g4_quartile    = as.character(strata_of(rowMeans(g4m, na.rm = TRUE))),
+    rloop_quartile = as.character(strata_of(rowMeans(rlm, na.rm = TRUE))),
+    stringsAsFactors = FALSE)
+})) %>%
+  dplyr::mutate(symbol    = unname(prom_symbol[match(entrez, prom_entrez)]),
+                log_g4    = log2(g4_tss    + pc_cnt),
+                log_rloop = log2(rloop_tss + pc_cnt)) %>%
+  dplyr::filter(is.finite(log_g4), is.finite(log_rloop))
+tss_scores$genotype       <- factor(tss_scores$genotype, levels = geno_lvls)
+tss_scores$g4_quartile    <- factor(tss_scores$g4_quartile, levels = q_lvls)
+tss_scores$rloop_quartile <- factor(tss_scores$rloop_quartile, levels = q_lvls)
+readr::write_csv(tss_scores, "results/tables/g4_rloop_tss_scores.csv")
+
+# Correlation within each panel. Spearman as well as Pearson because the TSS
+# scores are heavy-tailed and one very high promoter can carry a Pearson r.
+tss_corr <- function(qcol) {
+  tss_scores %>%
+    dplyr::filter(!is.na(.data[[qcol]])) %>%
+    dplyr::group_by(genotype, quartile = .data[[qcol]], .drop = FALSE) %>%
+    dplyr::summarise(
+      n = dplyr::n(),
+      pearson_r = if (dplyr::n() >= 3 && stats::sd(log_g4) > 0 && stats::sd(log_rloop) > 0)
+                    suppressWarnings(stats::cor(log_g4, log_rloop)) else NA_real_,
+      spearman_rho = if (dplyr::n() >= 3)
+                    suppressWarnings(stats::cor(log_g4, log_rloop, method = "spearman"))
+                    else NA_real_,
+      .groups = "drop") %>%
+    dplyr::mutate(stratify_by = qcol)
+}
+tss_stats <- dplyr::bind_rows(tss_corr("g4_quartile"), tss_corr("rloop_quartile"))
+readr::write_csv(tss_stats, "results/tables/g4_rloop_tss_quartile_correlation.csv")
+
+# One hex polygon per occupied cell instead of one path per promoter: ~6.1k
+# promoters per panel x 16 panels would be ~98k vector objects, which is what
+# makes the existing scatter PDFs unopenable in Illustrator.
+hex_layer <- function(bins, legend) {
+  if (use_hexbin)
+    list(geom_hex(bins = bins), scale_fill_viridis_c(trans = "log10", name = legend))
+  else geom_point(alpha = 0.2, size = 0.35, colour = "grey25")
+}
+
+plot_tss_scatter <- function(qcol, cut_lab, file) {
+  df <- tss_scores %>% dplyr::filter(!is.na(.data[[qcol]])) %>%
+    dplyr::mutate(quartile = .data[[qcol]])
+  st <- tss_stats %>% dplyr::filter(stratify_by == qcol, n > 0)
+  st$genotype <- factor(as.character(st$genotype), levels = geno_lvls)
+  st$quartile <- factor(as.character(st$quartile), levels = q_lvls)
+  p <- ggplot(df, aes(log_g4, log_rloop)) +
+  # NOT hex_layer(): that one lets the fill range follow the data, which is right
+  # for a pooled scatter and wrong here. Quartering the promoters quarters the
+  # count in every hex (measured: median 3-5 per hex, 90th pct 10-19), while the
+  # y=0 dropout row -- promoters with no R-loop signal at the TSS -- still piles
+  # up to ~2,000 into a handful of hexes. A data-driven ramp is therefore set by
+  # that one artefact row and leaves the real cloud in its bottom eighth. Fixed
+  # limits put the whole ramp where the structure is and make the 16 panels
+  # comparable to each other. oob = squish, so out-of-range hexes are still
+  # DRAWN (in the end colours) -- no promoter is dropped from the figure, and no
+  # r/rho/n value above is affected.
+    (if (use_hexbin)
+       list(geom_hex(bins = tss_hex_bins),
+            scale_fill_viridis_c(trans = "log10", limits = tss_fill_lim,
+                                 breaks = tss_fill_brk, oob = scales::squish,
+                                 name = "promoters"))
+     else geom_point(alpha = 0.2, size = 0.35, colour = "grey25")) +
+    geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+                colour = "#E41A1C", linewidth = 0.8) +
+    geom_text(data = st, inherit.aes = FALSE, aes(x = -Inf, y = Inf,
+              label = sprintf("r = %.2f\nrho = %.2f\nn = %s", pearson_r, spearman_rho,
+                              format(n, big.mark = ","))),
+              hjust = -0.12, vjust = 1.15, size = 2.4, colour = "grey20", lineheight = 0.95) +
+    facet_grid(genotype ~ quartile) +
+    labs(x = sprintf("log2 %s signal, TSS +/- %d bp (x background)", g4_lab, tss_hw),
+         y = sprintf("log2 %s signal, TSS +/- %d bp (x background)", rl_lab, tss_hw),
+         title = sprintf("G4 and R-loop signal at the TSS, within %s quartile", cut_lab),
+         subtitle = paste0(
+           sprintf("panels cut on mean %s over TSS +/- %d bp; axes are the narrower +/- %d bp score; ",
+                   cut_lab, half_width, tss_hw),
+           "red = OLS fit\n",
+           "r is range-restricted within a panel, so compare r ACROSS panels, ",
+           "not against the pooled correlation in rule 25\n",
+           sprintf("fill is FIXED at %g-%g promoters per hex and shared by all panels; ",
+                   tss_fill_lim[1], tss_fill_lim[2]),
+           "hexes below the floor are drawn in the darkest colour, not removed")) +
+    theme_pub()
+  save_plot(p, file, fig_subdir, fig_root,
+            width = 2.9 * n_strata + 2.2, height = 2.6 * length(geno_lvls) + 2)
+}
+plot_tss_scatter("g4_quartile",    "G4",     "g4_rloop_tss_scatter_byG4quartile")
+plot_tss_scatter("rloop_quartile", "R-loop", "g4_rloop_tss_scatter_byRloopquartile")
+
+message("\nWithin-quartile G4 vs R-loop correlation at the TSS (+/- ", tss_hw, " bp):")
+print(as.data.frame(tss_stats))
+
 # ===========================================================================
 # View 3: G4+/- promoter violin with a random-window null
 # ===========================================================================
@@ -394,12 +547,14 @@ dd_lab <- setNames(sprintf("%s\nr=%.2f  n=%s", dd_stats$ko, dd_stats$r,
                            format(dd_stats$n, big.mark = ",")), as.character(dd_stats$ko))
 p_delta <- ggplot(dd, aes(g4_logFC, rloop_logFC)) +
   geom_hline(yintercept = 0, colour = "grey60") + geom_vline(xintercept = 0, colour = "grey60") +
-  geom_point(alpha = 0.18, size = 0.4, colour = "grey25") +
-  geom_smooth(method = "lm", se = FALSE, colour = "#E41A1C", linewidth = 0.9) +
+  hex_layer(hex_bins, "promoters") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              colour = "#E41A1C", linewidth = 0.9) +
   facet_wrap(~ ko, labeller = labeller(ko = dd_lab)) +
   labs(x = sprintf("%s log2FC (KO vs WT)", g4_lab),
        y = sprintf("%s log2FC (KO vs WT)", rl_lab),
-       title = "Coordinated change of G4 and R-loop at promoters on helicase loss") +
+       title = "Coordinated change of G4 and R-loop at promoters on helicase loss",
+       subtitle = "fill = promoters per hex (log10); r in the strip is over all points, unbinned") +
   theme_pub()
 save_plot(p_delta, "g4_rloop_delta_scatter", fig_subdir, fig_root, width = 10, height = 5)
 
@@ -409,18 +564,34 @@ volc <- ko_diff %>% dplyr::filter(is.finite(rloop_logFC), is.finite(rloop_padj))
                 g4_class = factor(ifelse(g4_class %in% c("gained", "lost", "stable"),
                                          g4_class, "ambiguous"),
                                   levels = c("gained", "stable", "lost", "ambiguous")))
-p_volc <- ggplot(volc %>% dplyr::arrange(g4_class != "stable"),
-                 aes(rloop_logFC, neglog10p, colour = g4_class)) +
-  geom_point(alpha = 0.5, size = 0.5) +
+# The colour IS the message here, so the whole panel cannot become one hex fill.
+# Instead hex only the classes in volcano_hex_classes -- the grey mass, ~70.7k of
+# the 73.4k points, which carries no colour information anyway -- and keep
+# gained/lost (~2.8k) as real points. Same figure semantics, ~26x fewer vector
+# objects. Grey (not viridis) for the hex fill so it stays visually background.
+volc_bg <- volc %>% dplyr::filter(as.character(g4_class) %in% volc_hex_cls)
+volc_fg <- volc %>% dplyr::filter(!as.character(g4_class) %in% volc_hex_cls)
+message("Volcano: ", nrow(volc_bg), " points hex-binned (", paste(volc_hex_cls, collapse = "/"),
+        "), ", nrow(volc_fg), " drawn as points")
+
+p_volc <- ggplot(mapping = aes(rloop_logFC, neglog10p)) +
+  (if (use_hexbin)
+     list(geom_hex(data = volc_bg, bins = hex_bins),
+          scale_fill_gradient(low = "grey90", high = "grey45", trans = "log10",
+                              name = sprintf("%s
+promoters", paste(volc_hex_cls, collapse = "/"))))
+   else geom_point(data = volc_bg, aes(colour = g4_class), alpha = 0.5, size = 0.5)) +
+  geom_point(data = volc_fg, aes(colour = g4_class), alpha = 0.8, size = 0.7) +
   geom_hline(yintercept = -log10(voom_padj), linetype = 2, colour = "grey50") +
   geom_vline(xintercept = c(-voom_lfc, voom_lfc), linetype = 2, colour = "grey50") +
   facet_wrap(~ ko) +
   scale_colour_manual(values = c(gained = "#E41A1C", stable = "grey75",
                                  lost = "#377EB8", ambiguous = "grey90"),
-                      name = "G4 change") +
+                      name = "G4 change", drop = FALSE) +
   labs(x = sprintf("%s log2FC (KO vs WT)", rl_lab), y = "-log10 adj.P (R-loop)",
        title = "Differential R-loop at promoters, coloured by G4 differential class",
-       subtitle = "do R-loop changes concentrate where G4 also changes?") +
+       subtitle = paste("do R-loop changes concentrate where G4 also changes?",
+                        "stable/ambiguous promoters are hex-binned; gained/lost are points")) +
   theme_pub()
 save_plot(p_volc, "g4_rloop_rloop_volcano", fig_subdir, fig_root, width = 10, height = 5)
 

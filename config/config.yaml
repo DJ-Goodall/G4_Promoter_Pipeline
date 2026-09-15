@@ -306,11 +306,21 @@ metaprofile:
                                  # no-expression floor, not a fifth quantile of
                                  # the same continuum (hence also the dashed
                                  # line). Set to a blue to fold it into the ramp.
-  expr_min_regions_per_panel: 20 # curves below this n are not drawn; the panel
+  expr_min_regions_per_panel: 1  # curves below this n are not drawn; the panel
                                  # still appears (drop = FALSE) with its n, so
                                  # "no data" reads differently from "no signal".
                                  # Bites only rule 51 (antiparallel = 68 and
                                  # no_canonical_PQS = 56 promoters in TOTAL).
+                                 # Was 20, which left the antiparallel and
+                                 # no-canonical-PQS rows entirely blank (n = 1-17
+                                 # per panel) and so read as "zero signal" rather
+                                 # than "few promoters" -- worse, an empty panel
+                                 # has no y-scale, so its n annotation had
+                                 # nowhere to land and vanished too. At 1 every
+                                 # panel draws its curve AND its n. Sparse curves
+                                 # are noisy by construction and an n = 1 panel
+                                 # has no ribbon (sd of one value is NA); the
+                                 # per-panel n is what keeps that honest.
   expr_verify_equivalence: true  # rule 50 re-profiles one 400-region sample via
                                  # mean_replicate_profile() while the bigWigs are
                                  # still hot and asserts the cached path
@@ -375,6 +385,9 @@ g4_rloop_correlation:
   bin_subsample_n: 3000
   comparability: zscore
   hexbin: true
+  hexbin_bins: 60          # hex resolution for BOTH scatters in this rule. The
+                           # binned plot was ~120k vector points (3.5 MB PDF);
+                           # hexed it is ~2k polygons and editable in Illustrator.
 
 # ---- G4 vs R-loop promoter co-occurrence (DeepG4 rule 26) -----------------
 g4_rloop_cooccurrence:
@@ -393,6 +406,37 @@ g4_rloop_cooccurrence:
   voom_padj: 0.1
   voom_lfc: 0.585
   profile_subsample_n: null
+  # -- density rendering (poster legibility; no effect on any statistic) -------
+  hexbin: true
+  hexbin_bins: 60          # delta-delta scatter: 73,449 points -> hex
+  volcano_hex_classes: [stable, ambiguous]
+                           # volcano: these classes are drawn as hex (the grey
+                           # mass, ~70.7k points); gained/lost stay as real
+                           # points (~2.8k) so the G4-class colouring survives.
+  # -- TSS-window co-occurrence scatters (new) --------------------------------
+  tss_scatter_half_width: 250   # "signal at the TSS" = mean of the bins within
+                                # +/-250 bp. Deliberately NARROWER than the
+                                # +/-2000 bp window that defines the quartiles,
+                                # so the within-panel correlation is not just a
+                                # range-restricted view of the cut variable.
+  tss_scatter_hexbin_bins: 45   # panels hold ~6.1k promoters each, so fewer hexes
+  tss_scatter_fill_limits: [1, 100]
+  tss_scatter_fill_breaks: [1, 10, 100]
+                                # FIXED and SHARED by all 16 panels, unlike the
+                                # data-driven scale on the pooled scatters in
+                                # rule 25. What washed the old version out was
+                                # the CEILING, not the floor: the y=0 row (
+                                # promoters with no R-loop signal at the TSS)
+                                # piles into a few hexes holding up to ~2,000,
+                                # which stretched the ramp so the real cloud sat
+                                # in its bottom eighth. Measured counts per hex
+                                # in a panel are median 3-5, 90th pct 10-19, so
+                                # 1-100 is where essentially all the structure
+                                # lives; the dropout row saturates at the top
+                                # colour. oob = squish, so nothing is dropped.
+                                # NB a 10-1000 range was tried and is worse:
+                                # 68-89% of hexes per panel hold <10 promoters
+                                # and would collapse into a single colour.
 
 # ---- Unclassified (no-canonical-PQS) peak characterisation (rules 18-20) --
 unclassified:

@@ -68,8 +68,10 @@ bg_seed    <- as.integer(gc_cfg$background_seed %||% 7L)
 sub_n      <- as.integer(gc_cfg$bin_subsample_n %||% 3000L)
 comparab   <- gc_cfg$comparability   %||% "zscore"
 use_hexbin <- isTRUE(gc_cfg$hexbin %||% TRUE)
+hex_bins   <- as.integer(gc_cfg$hexbin_bins %||% 60L)
 if (use_hexbin && !requireNamespace("hexbin", quietly = TRUE)) {
-  message("Package 'hexbin' unavailable; mean-analysis plot falls back to a scatter.")
+  message("Package 'hexbin' unavailable; BOTH scatters fall back to points. ",
+          "install.packages('hexbin') to get the small, editable PDFs.")
   use_hexbin <- FALSE
 }
 n_bins <- as.integer((2L * bin_hw) %/% bin_size)
@@ -274,6 +276,18 @@ readr::write_csv(stats_tbl,    "results/tables/g4_rloop_promoter_correlation_sta
 xlab_z <- sprintf("z-scored log2 %s promoter signal", assay_label_map[["G4_BG4"]])
 ylab_z <- sprintf("z-scored log2 %s promoter signal", assay_label_map[["Rloop_S96"]])
 
+# Density layer shared by both scatters. geom_hex emits one polygon per
+# occupied cell instead of one path per observation, so the PDF drops from
+# ~120k vector objects to ~2k -- the difference between a figure Illustrator
+# can open and one it cannot. Purely a rendering change: no value plotted here
+# feeds any statistic in stats_tbl.
+density_layer <- function(bins = hex_bins, legend = "promoters") {
+  if (use_hexbin)
+    list(geom_hex(bins = bins),
+         scale_fill_viridis_c(trans = "log10", name = legend))
+  else geom_point(alpha = 0.25, size = 0.4, colour = "grey25")
+}
+
 # per-genotype facet labels carrying r / rho / n
 facet_lab <- function(st_sub) {
   setNames(
@@ -285,11 +299,8 @@ lab_mean <- facet_lab(stats_tbl[stats_tbl$analysis == "mean_promoter", ])
 lab_bin  <- facet_lab(stats_tbl[stats_tbl$analysis == "binned_pooled", ])
 
 # --- mean-per-promoter (hexbin), facet by genotype ---
-p_mean <- ggplot(per_prom_all, aes(x = z_g4, y = z_rloop))
-p_mean <- p_mean + (if (use_hexbin)
-  list(geom_hex(bins = 60), scale_fill_viridis_c(trans = "log10", name = "promoters"))
-  else geom_point(alpha = 0.25, size = 0.4, colour = "grey25"))
-p_mean <- p_mean +
+p_mean <- ggplot(per_prom_all, aes(x = z_g4, y = z_rloop)) +
+  density_layer(legend = "promoters") +
   geom_abline(slope = 1, intercept = 0, linetype = 2, colour = "grey40") +
   geom_smooth(method = "loess", span = 0.6, se = TRUE,
               colour = "#E41A1C", fill = "#E41A1C", linewidth = 0.9) +
@@ -302,7 +313,7 @@ save_plot(p_mean, "g4_vs_rloop_promoter_mean", "18_g4_rloop_correlation", fig_ro
 
 # --- binned pooled (scatter), facet by genotype ---
 p_bin <- ggplot(bin_all, aes(x = z_g4, y = z_rloop)) +
-  geom_point(alpha = 0.25, size = 0.4, colour = "grey25") +
+  density_layer(legend = "bins") +
   geom_abline(slope = 1, intercept = 0, linetype = 2, colour = "grey40") +
   geom_smooth(method = "loess", span = 0.6, se = TRUE,
               colour = "#E41A1C", fill = "#E41A1C", linewidth = 0.9) +
@@ -310,7 +321,8 @@ p_bin <- ggplot(bin_all, aes(x = z_g4, y = z_rloop)) +
   labs(x = xlab_z, y = ylab_z,
        title = sprintf("G4 vs R-loop signal in %d-bp bins by genotype (TSS +/- %d bp, %d promoters)",
                        bin_size, bin_hw, length(prom_sub)),
-       subtitle = "pooled r partly reflects the shared TSS profile shape") +
+       subtitle = paste("pooled r partly reflects the shared TSS profile shape;",
+                        "fill = promoter-bins per hex (log10)")) +
   theme_pub()
 save_plot(p_bin, "g4_vs_rloop_promoter_binned", "18_g4_rloop_correlation", fig_root, 9, 8)
 
