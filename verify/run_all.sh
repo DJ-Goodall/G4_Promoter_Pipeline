@@ -69,6 +69,9 @@ run "5. Calibrate the G4Hunter motif threshold against real mm10" \
 run "6. Scaled-region profile geometry (rules 52/53)" \
     verify/test_scaled_profile.R
 
+run "7. Half-G4 site scanner on synthetic sequences (rule 56)" \
+    verify/test_half_g4.R
+
 echo ""
 if [ "$fail" -eq 0 ]; then
   echo "=============================================================="

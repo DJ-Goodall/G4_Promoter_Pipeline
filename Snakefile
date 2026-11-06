@@ -113,6 +113,22 @@ GENE_EXPR_FIGS = [
 ]
 KOS = ["DHX36KO","FANCJKO","dKO"]
 
+# Stage O (rules 54-56). Module-scope lists, like the others above, so rule all
+# and the rules themselves cannot drift apart.
+_G26 = "results/figures/26_nopqs_half_g4/"
+NOPQS_HALF_FIGS = [_G26 + "nopqs_{}.pdf".format(f) for f in (
+    "relaxed_pqs", "half_site_rates", "half_site_score", "half_site_strand",
+    "half_site_rloop", "half_site_strength", "half_site_genotype")]
+NOPQS_HALF_TABS = ["results/tables/nopqs_{}.csv".format(t) for t in (
+    "relaxed_pqs", "half_sites", "half_site_rates", "half_site_strand",
+    "half_site_rloop", "half_site_strength", "half_site_genotype")]
+NOPQS_TARGETS = NOPQS_HALF_FIGS + [
+    "results/tables/nopqs_evidence_summary.csv",
+    "results/tables/nopqs_sets_summary.csv",
+    "results/tables/nopqs_deepg4_summary.csv",
+    _G26 + "nopqs_deepg4_maxprob.pdf",
+]
+
 # Stage-B peak/region caches (recomputed, not hand-built). Precompute all
 # expand() lists at module scope (multi-line expand inside a rule body confuses
 # Snakemake's rule parser, so rules reference these single tokens instead).
@@ -219,6 +235,10 @@ rule all:
         # list keeps this in step with metaprofile.expr_gene_assays.
         *GENE_EXPR_FIGS,
         "results/figures/25_tss_tes_metaprofiles/gene_signal_by_expression_topology.pdf",
+        # Stage O -- half-G4 sites in no-canonical-PQS peaks (rules 54-56).
+        # Every figure plus the evidence table, not one representative (the
+        # Stage N lesson: one pre-existing target keeps a rule out of the DAG).
+        *NOPQS_TARGETS,
 
 
 # ===========================================================================
@@ -964,3 +984,49 @@ rule gene_body_expression_topology_metaprofiles:
         fig_shape = "results/figures/25_tss_tes_metaprofiles/gene_signal_by_expression_topology_shape.pdf",
     log: "logs/53_gene_body_expression_topology_metaprofiles.log"
     shell: "Rscript scripts/53_gene_body_expression_topology_metaprofiles.R {CONFIG} > {log} 2>&1"
+
+
+# ===========================================================================
+# Stage O - half-G4 sites in no-canonical-PQS peaks (rules 54-56)
+# ===========================================================================
+# Are the 2,405 union BG4 peaks with no pqsfinder PQS >= 20 hybrid /
+# intermolecular G4s, i.e. do they carry HALF sites an RNA or another strand
+# could complete? Three rules, split so a TensorFlow failure costs one rule:
+#   54 builds the four sequence sets ONCE (noPQS, its dinucleotide shuffle,
+#      width-matched PQS peaks, width+GC-matched random genome) so 55 and 56
+#      score byte-identical sequences. Drops the 148 noPQS peaks that lie in
+#      mm10 assembly gaps (>10% N: no sequence to carry a PQS).
+#   55 the full-peak DeepG4 scan (TF, like rule 19). The existing DeepG4 score
+#      saw ONE 201 bp window per peak -- the midpoint, for noPQS peaks.
+#   56 relaxed pqsfinder + the half-site scanner (scripts/_shared/half_g4.R)
+#      + strand / R-loop / strength / genotype tests. Does NOT depend on 55.
+# No rule here opens a bigWig.
+rule nopqs_sets:
+    input: peaks = "cache/peaks.rds", topo = "results/tables/peak_topology.csv"
+    output:
+        sets = "cache/nopqs_sets.rds",
+        summ = "results/tables/nopqs_sets_summary.csv",
+    log: "logs/54_nopqs_sets.log"
+    shell: "Rscript scripts/54_nopqs_sets.R {CONFIG} > {log} 2>&1"
+
+rule nopqs_deepg4_scan:
+    input: sets = "cache/nopqs_sets.rds", scores = "results/tables/deepg4_scores.csv"
+    output:
+        windows = "cache/nopqs_deepg4_windows.rds",
+        scan = "results/tables/nopqs_deepg4_scan.csv",
+        summ = "results/tables/nopqs_deepg4_summary.csv",
+        fig = _G26 + "nopqs_deepg4_maxprob.pdf",
+    log: "logs/55_nopqs_deepg4_scan.log"
+    shell: "Rscript scripts/55_nopqs_deepg4_scan.R {CONFIG} > {log} 2>&1"
+
+rule nopqs_half_g4:
+    input: sets = "cache/nopqs_sets.rds", peaks = "cache/peaks.rds",
+           rloop = expand("cache/peaks_Rloop_S96_{g}.rds", g=GENO + ["union"]),
+           groups = "results/tables/tss_expression_gene_groups.csv",
+           scanner = "scripts/_shared/half_g4.R"
+    output:
+        tabs = NOPQS_HALF_TABS,
+        evidence = "results/tables/nopqs_evidence_summary.csv",
+        figs = NOPQS_HALF_FIGS,
+    log: "logs/56_nopqs_half_g4.log"
+    shell: "Rscript scripts/56_nopqs_half_g4.R {CONFIG} > {log} 2>&1"

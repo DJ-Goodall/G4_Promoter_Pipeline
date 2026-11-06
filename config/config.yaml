@@ -584,6 +584,72 @@ unclassified:
   motif_pcut: 5.0e-5
   jaspar_tax: "vertebrates"
 
+# ---- Stage O: half-G4 sites in no-canonical-PQS peaks (rules 54-56) -------
+# Question: are the 2,405 union peaks with no pqsfinder PQS >= 20 hybrid /
+# intermolecular G4s -- i.e. do they carry HALF sites (2-3 G-tracts) that an
+# RNA or another DNA strand could complete? Measured before building this
+# (2026-09-24, crude G3.L1-7.G3 regex): no-PQS 0.44/kb, their own dinucleotide
+# shuffle 0.46/kb, random mm10 2.51/kb, PQS peaks 3.34/kb. The rule makes that
+# rigorous; it is built to be able to come out negative.
+nopqs_half_g4:
+  seed: 11
+  # -- rule 54: comparator sets ----------------------------------------------
+  # All four sets are the SAME size (n = no-PQS peaks) and width-matched, so
+  # per-kb rates and DeepG4 window counts compare directly.
+  max_n_frac: 0.1          # noPQS peaks above this N fraction are dropped from
+                           # every set. Measured: 148 of 2,405 contain N and all
+                           # are >= 57% N (145 are >= 99% -- peaks called inside
+                           # mm10 assembly gaps, with no sequence to have a PQS).
+                           # 0.1 is DeepG4's own filter, so 2,257 survive: exactly
+                           # the set rule 19 scored.
+  gc_bins: 20              # random_gc is matched to the no-PQS GC distribution
+                           # in quantile bins, as rule 18 does for its background
+  random_pool_mult: 40     # random windows drawn per target before GC matching.
+                           # No-PQS peaks are AT-rich (median GC 0.36 vs 0.42
+                           # genome-wide), so the low-GC bins are the ones that
+                           # need the pool; shortfall is reported, never silent.
+  random_pool_min: 20000   # per-width floor on that pool. Without it the rare
+                           # 2-5 kb widths got 40-200 draws and the build came up
+                           # 22 windows short, all in the < 0.30 GC bin.
+  shuffle_k: 2             # dinucleotide shuffle = the PRIMARY null: same
+                           # composition, CpG and G/C skew as the real peak, no
+                           # positional structure. k = 1 would also destroy
+                           # dinucleotide bias and overstate any enrichment.
+  # -- rule 55: full-peak DeepG4 scan ---------------------------------------
+  deepg4_step: 20          # 201 bp windows every 20 bp (DeepG4Scan's own k).
+                           # ~41 windows per 1 kb peak. The existing rule-19
+                           # score saw ONE midpoint window, ~19% of a no-PQS peak.
+  deepg4_batch: 50000      # windows per DeepG4() call; bounds TF memory
+                           # (one-hot 50k x 201 x 4 float32 = 160 MB)
+  deepg4_prob_cuts: [0.25, 0.5, 0.75]   # 0.5 is DeepG4Scan's default threshold
+  # -- rule 56: relaxed pqsfinder control -------------------------------------
+  # Measured 2026-09-24 on 200 no-PQS peaks: best score median 15, 90th pct 19;
+  # 80% have a PQS >= 10, 51% >= 15, 0% >= 20 at pqsfinder's default max_len 50
+  # (by definition). max_len 70 recovers a PQS >= 20 in 3.5% (long-loop G4s the
+  # pipeline cannot see); max_len 100 adds nothing over 70. The same peaks
+  # dinucleotide-shuffled reach >= 20 in 48% -- the real sequence is DEPLETED of
+  # G4 motifs relative to its own composition.
+  relaxed_min_score: 10
+  relaxed_max_len: 70
+  pqs_thresholds: [10, 15, 20, 30]      # report fraction of peaks with best >= each
+  # -- rule 56: half-site scanner (scripts/_shared/half_g4.R) ----------------
+  min_run: 3               # G-tract length for the hypothesis tiers (T2/T3/T4)
+  gg_min_run: 2            # sensitivity tier (T2gg): GG tracts. Common in any
+                           # sequence, so never the headline.
+  loop_min: 1
+  loop_max: 7              # the canonical G4 loop range (Huppert & Balasubramanian)
+  loop_max_sensitivity: 12 # re-counted as a sensitivity row. The crude probe
+                           # gave 0.70/kb vs 0.76/kb shuffled at 12 -- same answer.
+  null_quantile: 0.95      # "high-confidence" = half_score >= this quantile of the
+                           # SAME tier in the shuffled null. Measured at runtime and
+                           # written to the rates table, not chosen by eye.
+  null_min_sites: 20       # below this many null sites in a tier, the threshold is
+                           # taken from the pooled G3 null (T2 + T3) instead
+  n_boot: 1000             # peak bootstrap for every rate CI
+  expression_genotype: WT  # which group_<genotype> column of
+                           # tss_expression_gene_groups.csv labels a gene as
+                           # expressed (Q1-Q4) / silent / unknown for the strand test
+
 # ---- Volcano + lncRNA G4 metaprofiles (rules 21-23) -----------------------
 lncrna:
   gtf_url:   "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.annotation.gtf.gz"
